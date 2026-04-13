@@ -691,38 +691,38 @@ except KeyboardInterrupt:
             </div>
 
             {/* Galaxy Style Keyboard */}
-            <div className="bg-[#D1D3D9] p-1.5 pb-8">
+            <div className="bg-[#D1D3D9] p-1 pb-4">
               {inputMode === 'sym' ? (
-                <div className="grid grid-cols-5 gap-1.5">
+                <div className="grid grid-cols-5 gap-1">
                   {SYMBOL_CONFIG.map(sym => (
                     <button
                       key={sym}
                       onClick={() => handleKeyClick(sym)}
-                      className="h-11 bg-white rounded-lg shadow-sm flex items-center justify-center text-lg active:bg-gray-200"
+                      className="h-9 bg-white rounded-md shadow-sm flex items-center justify-center text-sm active:bg-gray-200"
                     >
                       {sym}
                     </button>
                   ))}
                   <button 
                     onClick={() => setInputMode('ko')}
-                    className="col-span-5 h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
+                    className="col-span-5 h-9 bg-[#B0B3BC] rounded-md shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
                   >
                     뒤로가기
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-3 gap-1">
                   {/* Row 1-3: Main Keys */}
                   {KEYPAD_CONFIG.slice(0, 9).map(key => (
                     <button
                       key={key.id}
                       onClick={() => handleKeyClick(key.id)}
-                      className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors relative overflow-hidden"
+                      className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors relative overflow-hidden"
                     >
-                      <span className="absolute top-1 right-1.5 text-[8px] font-bold text-gray-300">{key.id}</span>
-                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
+                      <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">{key.id}</span>
+                      <span className="text-base font-bold text-gray-800">{key.label}</span>
                       {inputMode === 'en' && (
-                        <span className="text-[8px] text-gray-400 uppercase font-bold tracking-tighter">
+                        <span className="text-[7px] text-gray-400 uppercase font-bold tracking-tighter">
                           {key.en.join('')}
                         </span>
                       )}
@@ -732,16 +732,16 @@ except KeyboardInterrupt:
                   {/* Row 4: Symbols, ㅇㅁ (Center), Backspace */}
                   <button 
                     onClick={() => setInputMode('sym')}
-                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
+                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
                   >
                     !#1
                   </button>
                   <button 
                     onClick={() => handleKeyClick('0')}
-                    className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 relative"
+                    className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 relative"
                   >
-                    <span className="absolute top-1 right-1.5 text-[8px] font-bold text-gray-300">0</span>
-                    <span className="text-xl font-bold text-gray-800">ㅇㅁ</span>
+                    <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">0</span>
+                    <span className="text-base font-bold text-gray-800">ㅇㅁ</span>
                   </button>
                   <button 
                     onMouseDown={startBackspace}
@@ -749,29 +749,29 @@ except KeyboardInterrupt:
                     onMouseLeave={stopBackspace}
                     onTouchStart={startBackspace}
                     onTouchEnd={stopBackspace}
-                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
+                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
                   >
-                    <Delete className="w-5 h-5" />
+                    <Delete className="w-4 h-4" />
                   </button>
 
                   {/* Row 5: Mode, Space, Enter */}
                   <button 
                     onClick={() => handleKeyClick('mode')}
-                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400"
+                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[9px] font-bold active:bg-gray-400"
                   >
                     한/영
                   </button>
                   <button 
                     onClick={() => handleKeyClick('space')}
-                    className="h-14 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200"
+                    className="h-11 bg-white rounded-lg shadow-sm flex items-center justify-center active:bg-gray-200"
                   >
-                    <Space className="w-6 h-6" />
+                    <Space className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => handleKeyClick('enter')}
-                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
+                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
                   >
-                    <CornerDownLeft className="w-5 h-5" />
+                    <CornerDownLeft className="w-4 h-4" />
                   </button>
                 </div>
               )}

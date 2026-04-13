@@ -115,8 +115,9 @@ export default function App() {
           setComposition(prev => {
             const next = [...prev, char];
             const processed = processCheonjiin(next);
+            // If assembly fails or returns empty, show the raw jamos
             const assembled = Hangul.assemble(processed);
-            setText(assembled);
+            setText(assembled || processed.join(''));
             return next;
           });
         } else {
@@ -132,7 +133,7 @@ export default function App() {
               const next = prev.slice(0, -1);
               const processed = processCheonjiin(next);
               const assembled = Hangul.assemble(processed);
-              setText(assembled);
+              setText(assembled || processed.join(''));
               return next;
             } else {
               setText(prevText => prevText.slice(0, -1));
@@ -144,10 +145,15 @@ export default function App() {
           setText('');
         }
       });
+
+      socket.on('remote-mouse-move', ({ dx, dy }: { dx: number, dy: number }) => {
+        console.log('Mouse move:', dx, dy);
+      });
     }
     return () => {
       socket?.off('remote-keypress');
       socket?.off('remote-command');
+      socket?.off('remote-mouse-move');
     };
   }, [socket, mode, isConnected]);
 
@@ -182,29 +188,17 @@ export default function App() {
 
   const mapVowel = (seq: string): string | string[] => {
     const table: Record<string, string> = {
-      'ㆍㅣ': 'ㅏ',
-      'ㆍㆍㅣ': 'ㅑ',
-      'ㅣㆍ': 'ㅓ',
-      'ㅣㆍㆍ': 'ㅕ',
-      'ㆍㅡ': 'ㅗ',
-      'ㆍㆍㅡ': 'ㅛ',
-      'ㅡㆍ': 'ㅜ',
-      'ㅡㆍㆍ': 'ㅠ',
-      'ㅡㅣ': 'ㅢ',
-      'ㆍㅣㅣ': 'ㅐ',
-      'ㆍㆍㅣㅣ': 'ㅒ',
-      'ㅣㆍㅣ': 'ㅔ',
-      'ㅣㆍㆍㅣ': 'ㅖ',
-      'ㆍㅡㅣ': 'ㅚ',
-      'ㅡㆍㅣ': 'ㅟ',
-      'ㆍㅡㆍㅣ': 'ㅘ',
-      'ㆍㅡㆍㅣㅣ': 'ㅙ',
-      'ㅡㆍㅣㆍㅣ': 'ㅝ',
-      'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
-      'ㅣ': 'ㅣ',
-      'ㆍ': 'ㅏ', // Default single dot to ㅏ for assembly
-      'ㅡ': 'ㅡ'
+      'ㆍㅣ': 'ㅏ', 'ㆍㆍㅣ': 'ㅑ', 'ㅣㆍ': 'ㅓ', 'ㅣㆍㆍ': 'ㅕ',
+      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
+      'ㅡㅣ': 'ㅢ', 'ㆍㅣㅣ': 'ㅐ', 'ㆍㆍㅣㅣ': 'ㅒ', 'ㅣㆍㅣ': 'ㅔ',
+      'ㅣㆍㆍㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ', 'ㆍㅡㆍㅣ': 'ㅘ',
+      'ㆍㅡㆍㅣㅣ': 'ㅙ', 'ㅡㆍㅣㆍㅣ': 'ㅝ', 'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
+      'ㅣ': 'ㅣ', 'ㆍ': 'ㅏ', 'ㅡ': 'ㅡ'
     };
+    // Special case for single building blocks to ensure they show up
+    if (seq === 'ㆍ') return 'ㅏ'; 
+    if (seq === 'ㅣ') return 'ㅣ';
+    if (seq === 'ㅡ') return 'ㅡ';
     
     // Try to find the longest match from the start
     for (let len = seq.length; len > 0; len--) {
@@ -409,20 +403,24 @@ except Exception as e:
             <div className="bg-white border border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></div>
                   <span className="text-xs font-mono font-bold uppercase tracking-widest">
-                    {isConnected ? `Live Session: ${roomId}` : 'Disconnected'}
+                    {isConnected ? `Live Session: ${roomId}` : 'Connecting to Server...'}
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <button 
                     onClick={() => {
+                      if (!socket?.connected) {
+                        window.location.reload();
+                        return;
+                      }
                       socket?.emit('keypress', { roomId, char: '!' });
                       setTimeout(() => socket?.emit('command', { roomId, cmd: 'backspace' }), 500);
                     }}
                     className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
                   >
-                    Test Connection
+                    {isConnected ? 'Test Connection' : 'Reconnect'}
                   </button>
                   <button onClick={() => sendCommand('clear')} className="p-2 hover:bg-gray-100 rounded transition-colors" title="Clear">
                     <RefreshCw className="w-4 h-4" />
@@ -490,15 +488,19 @@ except Exception as e:
             </div>
 
             <div className="bg-white border border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
-              <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">도움말</h3>
+              <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">도움말 & 방 코드 안내</h3>
               <div className="space-y-4 text-xs text-gray-600">
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded">
+                  <p className="font-bold text-blue-800 mb-1">방 코드가 무엇인가요?</p>
+                  <p>내 핸드폰과 컴퓨터를 1:1로 안전하게 연결해주는 '비밀 번호'입니다. 이 코드가 있어야 다른 사람이 내 컴퓨터에 타이핑하는 것을 막을 수 있습니다.</p>
+                </div>
                 <div className="flex items-start gap-2">
                   <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">1</div>
-                  <p>핸드폰 자판은 0.7초 후 자동으로 글자가 완성됩니다.</p>
+                  <p>모음(ㅣ, ㆍ, ㅡ)은 여러 번 눌러 조합할 수 있습니다. (예: ㆍ + ㅣ = ㅏ)</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">2</div>
-                  <p>모음(ㅣ, ㆍ, ㅡ)은 여러 번 눌러 조합할 수 있습니다.</p>
+                  <p>상단 마우스 아이콘을 누르면 핸드폰을 트랙패드로 쓸 수 있습니다.</p>
                 </div>
               </div>
             </div>

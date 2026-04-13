@@ -73,6 +73,8 @@ export default function App() {
     
     const roomRef = doc(db, 'rooms', roomId);
     
+    let lastProcessedTimestamp = Date.now();
+
     // Listen for events (Receiver logic)
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (!snapshot.exists()) {
@@ -87,16 +89,20 @@ export default function App() {
       const event = data.lastEvent;
       
       if (event && mode === 'receiver') {
-        // Handle events based on type
-        if (event.type === 'keypress') {
-          handleRemoteKeypress(event.data.char);
-        } else if (event.type === 'command') {
-          handleRemoteCommand(event.data.cmd);
-        } else if (event.type === 'mouse-move') {
-          // Mouse move logic (logging for now)
-          console.log('Mouse move:', event.data.dx, event.data.dy);
-        } else if (event.type === 'mouse-click') {
-          console.log('Mouse click:', event.data.button);
+        // Only process new events
+        if (event.timestamp && event.timestamp > lastProcessedTimestamp) {
+          lastProcessedTimestamp = event.timestamp;
+          
+          // Handle events based on type
+          if (event.type === 'keypress') {
+            handleRemoteKeypress(event.data.char);
+          } else if (event.type === 'command') {
+            handleRemoteCommand(event.data.cmd);
+          } else if (event.type === 'mouse-move') {
+            console.log('Mouse move:', event.data.dx, event.data.dy);
+          } else if (event.type === 'mouse-click') {
+            console.log('Mouse click:', event.data.button);
+          }
         }
       }
     }, (err) => {
@@ -390,11 +396,20 @@ except Exception as e:
 room_id = '${roomId}'
 print(f"Monitoring Room: {room_id}")
 
+last_processed_timestamp = time.time() * 1000
+
 def on_snapshot(doc_snapshot, changes, read_time):
+    global last_processed_timestamp
     for doc in doc_snapshot:
         data = doc.to_dict()
         event = data.get('lastEvent')
         if not event: continue
+        
+        timestamp = event.get('timestamp', 0)
+        if timestamp <= last_processed_timestamp:
+            continue
+            
+        last_processed_timestamp = timestamp
         
         etype = event.get('type')
         edata = event.get('data', {})

@@ -15,41 +15,21 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 
-// --- Cheonjiin Logic ---
+// --- Cheonjiin Logic Constants ---
 const CHEONJIIN_KEYS = [
-  { id: 'ㄱ', label: 'ㄱㅋㄲ', chars: ['ㄱ', 'ㅋ', 'ㄲ'] },
-  { id: 'ㄴ', label: 'ㄴㄹ', chars: ['ㄴ', 'ㄹ'] },
-  { id: 'ㄷ', label: 'ㄷㅌㄸ', chars: ['ㄷ', 'ㅌ', 'ㄸ'] },
-  { id: 'ㅂ', label: 'ㅂㅍㅃ', chars: ['ㅂ', 'ㅍ', 'ㅃ'] },
-  { id: 'ㅅ', label: 'ㅅㅎ', chars: ['ㅅ', 'ㅎ'] },
-  { id: 'ㅈ', label: 'ㅈㅊㅉ', chars: ['ㅈ', 'ㅊ', 'ㅉ'] },
-  { id: 'ㅇ', label: 'ㅇㅁ', chars: ['ㅇ', 'ㅁ'] },
-  { id: 'ㅣ', label: 'ㅣ', chars: ['ㅣ'] },
-  { id: 'ㆍ', label: 'ㆍ', chars: ['ㆍ'] },
-  { id: 'ㅡ', label: 'ㅡ', chars: ['ㅡ'] },
+  { id: '1', label: 'ㅣ', chars: ['ㅣ'] },
+  { id: '2', label: 'ㆍ', chars: ['ㆍ'] },
+  { id: '3', label: 'ㅡ', chars: ['ㅡ'] },
+  { id: '4', label: 'ㄱㅋ', chars: ['ㄱ', 'ㅋ', 'ㄲ'] },
+  { id: '5', label: 'ㄴㄹ', chars: ['ㄴ', 'ㄹ'] },
+  { id: '6', label: 'ㄷㅌ', chars: ['ㄷ', 'ㅌ', 'ㄸ'] },
+  { id: '7', label: 'ㅂㅍ', chars: ['ㅂ', 'ㅍ', 'ㅃ'] },
+  { id: '8', label: 'ㅅㅎ', chars: ['ㅅ', 'ㅎ'] },
+  { id: '9', label: 'ㅈㅊ', chars: ['ㅈ', 'ㅊ', 'ㅉ'] },
+  { id: '*', label: 'ㅇㅁ', chars: ['ㅇ', 'ㅁ'] },
+  { id: '0', label: '공백', chars: [' '] },
+  { id: '#', label: '삭제', chars: ['backspace'] },
 ];
-
-// Map Cheonjiin vowels to standard jamo for hangul-js
-const VOWEL_MAP: Record<string, string> = {
-  'ㅣ': 'ㅣ',
-  'ㆍ': 'ㆍ', // Special handling needed for ㆍ
-  'ㅡ': 'ㅡ',
-};
-
-// Simplified Cheonjiin vowel assembly
-function assembleVowels(vowels: string[]): string {
-  const s = vowels.join('');
-  if (s === 'ㆍㅣ') return 'ㅏ';
-  if (s === 'ㆍㆍㅣ') return 'ㅑ';
-  if (s === 'ㅣㆍ') return 'ㅓ';
-  if (s === 'ㅣㆍㆍ') return 'ㅕ';
-  if (s === 'ㆍㅡ') return 'ㅗ';
-  if (s === 'ㆍㆍㅡ') return 'ㅛ';
-  if (s === 'ㅡㆍ') return 'ㅜ';
-  if (s === 'ㅡㆍㆍ') return 'ㅠ';
-  if (s === 'ㆍ') return 'ㅏ'; // Default single dot to ㅏ or similar depending on context, but usually it's part of a sequence
-  return s;
-}
 
 export default function App() {
   const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>('choice');
@@ -60,12 +40,11 @@ export default function App() {
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
-
   const [isConnected, setIsConnected] = useState(false);
 
   // Initialize Socket
   useEffect(() => {
-    const socketUrl = process.env.APP_URL || window.location.origin;
+    const socketUrl = window.location.origin;
     const newSocket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -78,11 +57,6 @@ export default function App() {
 
     newSocket.on('disconnect', () => {
       setIsConnected(false);
-      console.log('Socket disconnected');
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.error('Connection error:', err);
     });
 
     setSocket(newSocket);
@@ -96,28 +70,23 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const m = params.get('mode');
     const r = params.get('room');
-    if (m === 'sender' || m === 'receiver') {
-      setMode(m);
-    }
-    if (r) {
-      setRoomId(r);
-    }
+    if (m === 'sender' || m === 'receiver') setMode(m);
+    if (r) setRoomId(r);
   }, []);
 
-  // Join room when roomId is set
+  // Join room
   useEffect(() => {
     if (socket && roomId) {
       socket.emit('join-room', roomId);
     }
   }, [socket, roomId]);
 
-  // Receiver logic: listen for keypresses
+  // Receiver logic
   useEffect(() => {
     if (socket && mode === 'receiver') {
       socket.on('remote-keypress', (char: string) => {
         setComposition(prev => {
           const next = [...prev, char];
-          // Process Cheonjiin vowels
           const processed = processCheonjiin(next);
           setText(Hangul.assemble(processed));
           return next;
@@ -127,20 +96,6 @@ export default function App() {
         if (cmd === 'backspace') {
           setComposition(prev => {
             const next = prev.slice(0, -1);
-            const processed = processCheonjiin(next);
-            setText(Hangul.assemble(processed));
-            return next;
-          });
-        } else if (cmd === 'space') {
-          setComposition(prev => {
-            const next = [...prev, ' '];
-            const processed = processCheonjiin(next);
-            setText(Hangul.assemble(processed));
-            return next;
-          });
-        } else if (cmd === 'enter') {
-          setComposition(prev => {
-            const next = [...prev, '\n'];
             const processed = processCheonjiin(next);
             setText(Hangul.assemble(processed));
             return next;
@@ -157,14 +112,11 @@ export default function App() {
     };
   }, [socket, mode]);
 
-  // Helper to process Cheonjiin vowel sequences into standard jamo
   const processCheonjiin = (jamos: string[]) => {
     const result: string[] = [];
     let i = 0;
     while (i < jamos.length) {
       const cur = jamos[i];
-      
-      // Check for vowel sequences
       if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
         let seq = cur;
         let j = i + 1;
@@ -172,14 +124,9 @@ export default function App() {
           seq += jamos[j];
           j++;
         }
-        
-        // Map sequence to standard vowel
         const mapped = mapVowel(seq);
-        if (Array.isArray(mapped)) {
-          result.push(...mapped);
-        } else {
-          result.push(mapped);
-        }
+        if (Array.isArray(mapped)) result.push(...mapped);
+        else result.push(mapped);
         i = j;
       } else {
         result.push(cur);
@@ -191,28 +138,13 @@ export default function App() {
 
   const mapVowel = (seq: string): string | string[] => {
     const table: Record<string, string> = {
-      'ㆍㅣ': 'ㅏ',
-      'ㆍㆍㅣ': 'ㅑ',
-      'ㅣㆍ': 'ㅓ',
-      'ㅣㆍㆍ': 'ㅕ',
-      'ㆍㅡ': 'ㅗ',
-      'ㆍㆍㅡ': 'ㅛ',
-      'ㅡㆍ': 'ㅜ',
-      'ㅡㆍㆍ': 'ㅠ',
-      'ㅡㅣ': 'ㅢ',
-      'ㆍㅣㅣ': 'ㅐ',
-      'ㆍㆍㅣㅣ': 'ㅒ',
-      'ㅣㆍㅣ': 'ㅔ',
-      'ㅣㆍㆍㅣ': 'ㅖ',
-      'ㆍㅡㅣ': 'ㅚ',
-      'ㅡㆍㅣ': 'ㅟ',
-      'ㆍㅡㆍㅣ': 'ㅘ',
-      'ㆍㅡㆍㅣㅣ': 'ㅙ',
-      'ㅡㆍㅣㆍㅣ': 'ㅝ',
-      'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
+      'ㆍㅣ': 'ㅏ', 'ㆍㆍㅣ': 'ㅑ', 'ㅣㆍ': 'ㅓ', 'ㅣㆍㆍ': 'ㅕ',
+      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
+      'ㅡㅣ': 'ㅢ', 'ㆍㅣㅣ': 'ㅐ', 'ㆍㆍㅣㅣ': 'ㅒ', 'ㅣㆍㅣ': 'ㅔ',
+      'ㅣㆍㆍㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ', 'ㆍㅡㆍㅣ': 'ㅘ',
+      'ㆍㅡㆍㅣㅣ': 'ㅙ', 'ㅡㆍㅣㆍㅣ': 'ㅝ', 'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
+      'ㅣ': 'ㅣ', 'ㆍ': 'ㅏ', 'ㅡ': 'ㅡ' // Default mapping for single building blocks
     };
-    
-    // Try to find the longest match
     for (let len = seq.length; len > 0; len--) {
       const sub = seq.substring(0, len);
       if (table[sub]) {
@@ -224,7 +156,48 @@ export default function App() {
         return table[sub];
       }
     }
-    return seq.split(''); // Fallback to raw if no match
+    return seq.split('');
+  };
+
+  const handleKeyClick = (keyId: string, chars: string[]) => {
+    if (!socket || !roomId) return;
+
+    if (keyId === '#') {
+      socket.emit('command', { roomId, cmd: 'backspace' });
+      return;
+    }
+    if (keyId === '0') {
+      socket.emit('keypress', { roomId, char: ' ' });
+      return;
+    }
+
+    const isVowel = ['1', '2', '3'].includes(keyId);
+
+    if (lastChar === keyId && !isVowel) {
+      // Consonant multi-tap
+      socket.emit('command', { roomId, cmd: 'backspace' });
+      const nextTap = (tapCount + 1) % chars.length;
+      setTapCount(nextTap);
+      socket.emit('keypress', { roomId, char: chars[nextTap] });
+      
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      tapTimer.current = setTimeout(() => {
+        setLastChar(null);
+        setTapCount(0);
+      }, 800);
+    } else {
+      // New key or vowel
+      setLastChar(keyId);
+      setTapCount(0);
+      socket.emit('keypress', { roomId, char: chars[0] });
+      
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      if (!isVowel) {
+        tapTimer.current = setTimeout(() => {
+          setLastChar(null);
+        }, 800);
+      }
+    }
   };
 
   const generateRoom = () => {
@@ -232,57 +205,6 @@ export default function App() {
     setRoomId(id);
     setMode('receiver');
     window.history.pushState({}, '', `?mode=receiver&room=${id}`);
-  };
-
-  const commitChar = () => {
-    if (lastChar === null) return;
-    
-    const key = CHEONJIIN_KEYS.find(k => k.id === lastChar);
-    if (!key) return;
-
-    const char = key.chars[tapCount];
-    socket?.emit('keypress', { roomId, char });
-    
-    setLastChar(null);
-    setTapCount(0);
-    if (tapTimer.current) clearTimeout(tapTimer.current);
-  };
-
-  const handleKeyClick = (keyId: string, chars: string[]) => {
-    if (!socket || !roomId) return;
-
-    const isVowel = ['ㅣ', 'ㆍ', 'ㅡ'].includes(keyId);
-
-    if (lastChar === keyId && !isVowel) {
-      // Multi-tap: delete previous and send next
-      socket?.emit('command', { roomId, cmd: 'backspace' });
-      const nextTap = (tapCount + 1) % chars.length;
-      setTapCount(nextTap);
-      const char = chars[nextTap];
-      socket?.emit('keypress', { roomId, char });
-      
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-      tapTimer.current = setTimeout(() => {
-        setLastChar(null);
-        setTapCount(0);
-      }, 700);
-    } else {
-      if (lastChar !== null && !isVowel) commitChar();
-      
-      const char = chars[0];
-      socket?.emit('keypress', { roomId, char });
-      
-      if (!isVowel) {
-        setLastChar(keyId);
-        setTapCount(0);
-        tapTimer.current = setTimeout(() => {
-          setLastChar(null);
-          setTapCount(0);
-        }, 700);
-      } else {
-        setLastChar(null);
-      }
-    }
   };
 
   const sendCommand = (cmd: string) => {

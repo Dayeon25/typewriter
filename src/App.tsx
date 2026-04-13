@@ -65,7 +65,7 @@ export default function App() {
     addLog(`Connecting to: ${socketUrl}`);
     
     const newSocket = io(socketUrl, {
-      transports: ['polling', 'websocket'], // Try polling first for better compatibility
+      transports: ['websocket'], // Use websocket directly to avoid XHR polling issues
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,

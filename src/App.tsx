@@ -88,7 +88,8 @@ export default function App() {
         setComposition(prev => {
           const next = [...prev, char];
           const processed = processCheonjiin(next);
-          setText(Hangul.assemble(processed));
+          const assembled = Hangul.assemble(processed);
+          setText(assembled);
           return next;
         });
       });
@@ -97,7 +98,8 @@ export default function App() {
           setComposition(prev => {
             const next = prev.slice(0, -1);
             const processed = processCheonjiin(next);
-            setText(Hangul.assemble(processed));
+            const assembled = Hangul.assemble(processed);
+            setText(assembled);
             return next;
           });
         } else if (cmd === 'clear') {
@@ -110,23 +112,28 @@ export default function App() {
       socket?.off('remote-keypress');
       socket?.off('remote-command');
     };
-  }, [socket, mode]);
+  }, [socket, mode, isConnected]);
 
   const processCheonjiin = (jamos: string[]) => {
     const result: string[] = [];
     let i = 0;
     while (i < jamos.length) {
       const cur = jamos[i];
+      // If it's a Cheonjiin vowel building block
       if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
         let seq = cur;
         let j = i + 1;
+        // Collect consecutive vowel blocks
         while (j < jamos.length && (jamos[j] === 'ㅣ' || jamos[j] === 'ㆍ' || jamos[j] === 'ㅡ')) {
           seq += jamos[j];
           j++;
         }
         const mapped = mapVowel(seq);
-        if (Array.isArray(mapped)) result.push(...mapped);
-        else result.push(mapped);
+        if (Array.isArray(mapped)) {
+          result.push(...mapped);
+        } else {
+          result.push(mapped);
+        }
         i = j;
       } else {
         result.push(cur);
@@ -138,13 +145,31 @@ export default function App() {
 
   const mapVowel = (seq: string): string | string[] => {
     const table: Record<string, string> = {
-      'ㆍㅣ': 'ㅏ', 'ㆍㆍㅣ': 'ㅑ', 'ㅣㆍ': 'ㅓ', 'ㅣㆍㆍ': 'ㅕ',
-      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
-      'ㅡㅣ': 'ㅢ', 'ㆍㅣㅣ': 'ㅐ', 'ㆍㆍㅣㅣ': 'ㅒ', 'ㅣㆍㅣ': 'ㅔ',
-      'ㅣㆍㆍㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ', 'ㆍㅡㆍㅣ': 'ㅘ',
-      'ㆍㅡㆍㅣㅣ': 'ㅙ', 'ㅡㆍㅣㆍㅣ': 'ㅝ', 'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
-      'ㅣ': 'ㅣ', 'ㆍ': 'ㅏ', 'ㅡ': 'ㅡ' // Default mapping for single building blocks
+      'ㆍㅣ': 'ㅏ',
+      'ㆍㆍㅣ': 'ㅑ',
+      'ㅣㆍ': 'ㅓ',
+      'ㅣㆍㆍ': 'ㅕ',
+      'ㆍㅡ': 'ㅗ',
+      'ㆍㆍㅡ': 'ㅛ',
+      'ㅡㆍ': 'ㅜ',
+      'ㅡㆍㆍ': 'ㅠ',
+      'ㅡㅣ': 'ㅢ',
+      'ㆍㅣㅣ': 'ㅐ',
+      'ㆍㆍㅣㅣ': 'ㅒ',
+      'ㅣㆍㅣ': 'ㅔ',
+      'ㅣㆍㆍㅣ': 'ㅖ',
+      'ㆍㅡㅣ': 'ㅚ',
+      'ㅡㆍㅣ': 'ㅟ',
+      'ㆍㅡㆍㅣ': 'ㅘ',
+      'ㆍㅡㆍㅣㅣ': 'ㅙ',
+      'ㅡㆍㅣㆍㅣ': 'ㅝ',
+      'ㅡㆍㅣㆍㅣㅣ': 'ㅞ',
+      'ㅣ': 'ㅣ',
+      'ㆍ': 'ㅏ', // Default single dot to ㅏ for assembly
+      'ㅡ': 'ㅡ'
     };
+    
+    // Try to find the longest match from the start
     for (let len = seq.length; len > 0; len--) {
       const sub = seq.substring(0, len);
       if (table[sub]) {
@@ -174,11 +199,12 @@ export default function App() {
     const isVowel = ['1', '2', '3'].includes(keyId);
 
     if (lastChar === keyId && !isVowel) {
-      // Consonant multi-tap
+      // Consonant multi-tap: delete previous and send next
       socket.emit('command', { roomId, cmd: 'backspace' });
       const nextTap = (tapCount + 1) % chars.length;
       setTapCount(nextTap);
-      socket.emit('keypress', { roomId, char: chars[nextTap] });
+      const char = chars[nextTap];
+      socket.emit('keypress', { roomId, char });
       
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = setTimeout(() => {
@@ -187,15 +213,21 @@ export default function App() {
       }, 800);
     } else {
       // New key or vowel
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      
       setLastChar(keyId);
       setTapCount(0);
-      socket.emit('keypress', { roomId, char: chars[0] });
+      const char = chars[0];
+      socket.emit('keypress', { roomId, char });
       
-      if (tapTimer.current) clearTimeout(tapTimer.current);
       if (!isVowel) {
         tapTimer.current = setTimeout(() => {
           setLastChar(null);
         }, 800);
+      } else {
+        // Vowels don't need multi-tap timeout in the same way, 
+        // but we reset lastChar to allow immediate re-entry of same vowel if needed
+        setLastChar(null);
       }
     }
   };

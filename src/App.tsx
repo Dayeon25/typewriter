@@ -10,32 +10,36 @@ import {
   CornerDownLeft, 
   Space,
   RefreshCw,
-  Info
+  Info,
+  MousePointer2,
+  Type
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 
 // --- Keypad Configuration ---
 const KEYPAD_CONFIG = [
-  { id: '1', label: 'ㅣ', ko: ['ㅣ'], en: ['a', 'b', 'c'], num: ['1'] },
-  { id: '2', label: 'ㆍ', ko: ['ㆍ'], en: ['d', 'e', 'f'], num: ['2'] },
-  { id: '3', label: 'ㅡ', ko: ['ㅡ'], en: ['g', 'h', 'i'], num: ['3'] },
-  { id: '4', label: 'ㄱㅋ', ko: ['ㄱ', 'ㅋ', 'ㄲ'], en: ['j', 'k', 'l'], num: ['4'] },
-  { id: '5', label: 'ㄴㄹ', ko: ['ㄴ', 'ㄹ'], en: ['m', 'n', 'o'], num: ['5'] },
-  { id: '6', label: 'ㄷㅌ', ko: ['ㄷ', 'ㅌ', 'ㄸ'], en: ['p', 'q', 'r', 's'], num: ['6'] },
-  { id: '7', label: 'ㅂㅍ', ko: ['ㅂ', 'ㅍ', 'ㅃ'], en: ['t', 'u', 'v'], num: ['7'] },
-  { id: '8', label: 'ㅅㅎ', ko: ['ㅅ', 'ㅎ'], en: ['w', 'x', 'y', 'z'], num: ['8'] },
-  { id: '9', label: 'ㅈㅊ', ko: ['ㅈ', 'ㅊ', 'ㅉ'], en: ['.', ',', '!', '?'], num: ['9'] },
-  { id: '*', label: '한/영/123', ko: ['mode'], en: ['mode'], num: ['mode'] },
-  { id: '0', label: 'ㅇㅁ', ko: ['ㅇ', 'ㅁ'], en: [' '], num: ['0'] },
-  { id: '#', label: '삭제', ko: ['backspace'], en: ['backspace'], num: ['backspace'] },
+  { id: '1', label: 'ㅣ', enLabel: 'abc', ko: ['ㅣ'], en: ['a', 'b', 'c'], num: ['1'] },
+  { id: '2', label: 'ㆍ', enLabel: 'def', ko: ['ㆍ'], en: ['d', 'e', 'f'], num: ['2'] },
+  { id: '3', label: 'ㅡ', enLabel: 'ghi', ko: ['ㅡ'], en: ['g', 'h', 'i'], num: ['3'] },
+  { id: '4', label: 'ㄱㅋ', enLabel: 'jkl', ko: ['ㄱ', 'ㅋ', 'ㄲ'], en: ['j', 'k', 'l'], num: ['4'] },
+  { id: '5', label: 'ㄴㄹ', enLabel: 'mno', ko: ['ㄴ', 'ㄹ'], en: ['m', 'n', 'o'], num: ['5'] },
+  { id: '6', label: 'ㄷㅌ', enLabel: 'pqrs', ko: ['ㄷ', 'ㅌ', 'ㄸ'], en: ['p', 'q', 'r', 's'], num: ['6'] },
+  { id: '7', label: 'ㅂㅍ', enLabel: 'tuv', ko: ['ㅂ', 'ㅍ', 'ㅃ'], en: ['t', 'u', 'v'], num: ['7'] },
+  { id: '8', label: 'ㅅㅎ', enLabel: 'wxyz', ko: ['ㅅ', 'ㅎ'], en: ['w', 'x', 'y', 'z'], num: ['8'] },
+  { id: '9', label: 'ㅈㅊ', enLabel: '.,!?', ko: ['ㅈ', 'ㅊ', 'ㅉ'], en: ['.', ',', '!', '?'], num: ['9'] },
+  { id: '*', label: '한/영/123', enLabel: 'KO/EN/123', ko: ['mode'], en: ['mode'], num: ['mode'] },
+  { id: '0', label: 'ㅇㅁ', enLabel: 'space', ko: ['ㅇ', 'ㅁ'], en: [' '], num: ['0'] },
+  { id: '#', label: '삭제', enLabel: 'del', ko: ['backspace'], en: ['backspace'], num: ['backspace'] },
 ];
 
 type InputMode = 'ko' | 'en' | 'num';
+type MobileTab = 'keyboard' | 'mouse';
 
 export default function App() {
   const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>('choice');
   const [inputMode, setInputMode] = useState<InputMode>('ko');
+  const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
   const [roomId, setRoomId] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [text, setText] = useState('');
@@ -44,22 +48,33 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  
+  // Mouse state
+  const mouseRef = useRef({ x: 0, y: 0 });
 
   // Initialize Socket
   useEffect(() => {
+    // Force the socket to use the current origin and explicit path if needed
     const socketUrl = window.location.origin;
     const newSocket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
     });
 
     newSocket.on('connect', () => {
       setIsConnected(true);
-      console.log('Socket connected');
+      console.log('Socket connected:', newSocket.id);
     });
 
     newSocket.on('disconnect', () => {
       setIsConnected(false);
+      console.log('Socket disconnected');
+    });
+
+    newSocket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err);
     });
 
     setSocket(newSocket);
@@ -335,7 +350,7 @@ export default function App() {
 
   if (mode === 'receiver') {
     const shareUrl = `${window.location.origin}?mode=sender&room=${roomId}`;
-    const serverUrl = process.env.APP_URL || window.location.origin;
+    const serverUrl = window.location.origin;
     const pythonScript = `
 import socketio
 import pyautogui
@@ -357,6 +372,17 @@ def on_command(cmd):
         pyautogui.press('space')
     elif cmd == 'enter':
         pyautogui.press('enter')
+
+@sio.on('remote-mouse-move')
+def on_mouse_move(data):
+    dx = data.get('dx', 0)
+    dy = data.get('dy', 0)
+    pyautogui.moveRel(dx * 2, dy * 2)
+
+@sio.on('remote-mouse-click')
+def on_mouse_click(data):
+    button = data.get('button', 'left')
+    pyautogui.click(button=button)
 
 @sio.event
 def connect():
@@ -483,65 +509,144 @@ except Exception as e:
   }
 
   // Sender (Mobile Keyboard)
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (activeTab !== 'mouse' || !socket || !roomId) return;
+    const touch = e.touches[0];
+    if (mouseRef.current.x !== 0 && mouseRef.current.y !== 0) {
+      const dx = touch.clientX - mouseRef.current.x;
+      const dy = touch.clientY - mouseRef.current.y;
+      socket.emit('mouse-move', { roomId, dx, dy });
+    }
+    mouseRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleTouchEnd = () => {
+    mouseRef.current = { x: 0, y: 0 };
+  };
+
   return (
     <div className="fixed inset-0 bg-[#151619] flex flex-col font-mono text-white overflow-hidden select-none touch-none">
       {/* Header */}
-      <div className="p-4 border-bottom border-white/10 flex items-center justify-between">
+      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-[#1c1d21]">
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 animate-pulse'}`}></div>
           <Smartphone className="w-4 h-4 text-gray-500" />
-          <span className="text-[10px] uppercase tracking-widest text-gray-500">
-            {isConnected ? `Connected: ${roomId}` : 'Connecting...'}
+          <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+            {isConnected ? `Room: ${roomId}` : 'Connecting...'}
           </span>
         </div>
-        <button 
-          onClick={() => setMode('choice')}
-          className="text-[10px] uppercase tracking-widest text-gray-500 hover:text-white"
-        >
-          Exit
-        </button>
-      </div>
-
-      {/* Preview Area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <div className="text-center">
-          <div className="text-4xl font-medium mb-2 min-h-[1.2em] text-blue-400">
-            {lastChar ? KEYPAD_CONFIG.find(k => k.id === lastChar)?.[inputMode][tapCount] : ' '}
-          </div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">
-            {inputMode === 'ko' ? '한글 입력' : inputMode === 'en' ? 'English' : 'Numbers'}
-          </div>
-        </div>
-        
-        <div className="mt-12 flex gap-4">
+        <div className="flex gap-4">
           <button 
-            onClick={() => sendCommand('clear')}
-            className="px-4 py-2 border border-red-500/30 text-red-400 text-[10px] uppercase tracking-widest rounded-full hover:bg-red-500/10 transition-colors"
+            onClick={() => setActiveTab('keyboard')}
+            className={`p-2 rounded-lg transition-colors ${activeTab === 'keyboard' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}
           >
-            Clear All
+            <Type className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setActiveTab('mouse')}
+            className={`p-2 rounded-lg transition-colors ${activeTab === 'mouse' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}
+          >
+            <MousePointer2 className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setMode('choice')}
+            className="p-2 text-gray-500 hover:text-white"
+          >
+            <CornerDownLeft className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {/* Cheonjiin Keyboard */}
-      <div className="bg-[#1c1d21] p-2 pb-8 grid grid-cols-3 gap-2">
-        {KEYPAD_CONFIG.map((key) => (
-          <motion.button
-            key={key.id}
-            whileTap={{ scale: 0.95, backgroundColor: '#2a2b30' }}
-            onClick={() => handleKeyClick(key.id)}
-            className={`h-20 rounded-xl flex flex-col items-center justify-center border border-white/5 shadow-lg ${
-              key.id === '*' ? 'bg-blue-900/40 border-blue-500/30' : 'bg-[#232429]'
-            }`}
+      <AnimatePresence mode="wait">
+        {activeTab === 'keyboard' ? (
+          <motion.div 
+            key="keyboard"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="flex-1 flex flex-col"
           >
-            <span className="text-2xl font-bold">{key.id}</span>
-            <span className="text-[10px] text-gray-500 mt-1">{key.label}</span>
-          </motion.button>
-        ))}
-      </div>
+            {/* Preview Area */}
+            <div className="flex-1 flex flex-col items-center justify-center p-8">
+              <div className="text-center">
+                <div className="text-5xl font-bold mb-4 min-h-[1.2em] text-blue-400 drop-shadow-lg">
+                  {lastChar ? KEYPAD_CONFIG.find(k => k.id === lastChar)?.[inputMode][tapCount] : ' '}
+                </div>
+                <div className="px-3 py-1 bg-white/5 rounded-full text-[10px] uppercase tracking-[0.2em] text-gray-400 border border-white/10">
+                  {inputMode === 'ko' ? '한글 입력' : inputMode === 'en' ? 'English' : 'Numbers'}
+                </div>
+              </div>
+              
+              <div className="mt-12 flex gap-4">
+                <button 
+                  onClick={() => sendCommand('clear')}
+                  className="px-6 py-2 border border-red-500/30 text-red-400 text-[10px] uppercase tracking-widest rounded-full hover:bg-red-500/10 transition-colors font-bold"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            {/* Cheonjiin Keyboard */}
+            <div className="bg-[#1c1d21] p-3 pb-10 grid grid-cols-3 gap-3">
+              {KEYPAD_CONFIG.map((key) => (
+                <motion.button
+                  key={key.id}
+                  whileTap={{ scale: 0.92, backgroundColor: '#2a2b30' }}
+                  onClick={() => handleKeyClick(key.id)}
+                  className={`h-20 rounded-2xl flex flex-col items-center justify-center border border-white/5 shadow-xl transition-all ${
+                    key.id === '*' ? 'bg-blue-600/20 border-blue-500/40' : 'bg-[#232429]'
+                  }`}
+                >
+                  <span className="text-2xl font-bold mb-1">{key.id}</span>
+                  <div className="flex flex-col items-center leading-tight">
+                    <span className="text-[10px] text-gray-400 font-bold">{key.label}</span>
+                    <span className="text-[8px] text-gray-600 uppercase tracking-tighter">{key.enLabel}</span>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="mouse"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="flex-1 flex flex-col p-4"
+          >
+            <div 
+              className="flex-1 bg-[#232429] rounded-3xl border-2 border-white/5 shadow-inner flex items-center justify-center relative overflow-hidden"
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <div className="text-gray-600 flex flex-col items-center gap-4 pointer-events-none">
+                <MousePointer2 className="w-16 h-16 opacity-20" />
+                <span className="text-sm font-bold uppercase tracking-widest opacity-30">Trackpad</span>
+              </div>
+              
+              {/* Mouse Buttons */}
+              <div className="absolute bottom-6 left-6 right-6 h-24 flex gap-4">
+                <button 
+                  className="flex-1 bg-white/5 border border-white/10 rounded-2xl active:bg-white/20 transition-colors flex items-center justify-center font-bold uppercase tracking-widest text-xs"
+                  onClick={() => socket?.emit('mouse-click', { roomId, button: 'left' })}
+                >
+                  Left
+                </button>
+                <button 
+                  className="flex-1 bg-white/5 border border-white/10 rounded-2xl active:bg-white/20 transition-colors flex items-center justify-center font-bold uppercase tracking-widest text-xs"
+                  onClick={() => socket?.emit('mouse-click', { roomId, button: 'right' })}
+                >
+                  Right
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Bottom Bar */}
-      <div className="h-1 w-24 bg-white/10 mx-auto mb-2 rounded-full"></div>
+      <div className="h-1.5 w-20 bg-white/10 mx-auto mb-3 rounded-full"></div>
     </div>
   );
 }

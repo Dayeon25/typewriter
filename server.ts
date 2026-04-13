@@ -38,6 +38,14 @@ async function startServer() {
       socket.to(roomId).emit("remote-command", cmd);
     });
 
+    socket.on("mouse-move", ({ roomId, dx, dy }) => {
+      socket.to(roomId).emit("remote-mouse-move", { dx, dy });
+    });
+
+    socket.on("mouse-click", ({ roomId, button }) => {
+      socket.to(roomId).emit("remote-mouse-click", { button });
+    });
+
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
     });

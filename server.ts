@@ -29,11 +29,12 @@ async function startServer() {
     });
 
     socket.on("keypress", ({ roomId, char }) => {
-      // Broadcast to everyone in the room except sender
+      console.log(`Keypress in room ${roomId}: ${char}`);
       socket.to(roomId).emit("remote-keypress", char);
     });
 
     socket.on("command", ({ roomId, cmd }) => {
+      console.log(`Command in room ${roomId}: ${cmd}`);
       socket.to(roomId).emit("remote-command", cmd);
     });
 

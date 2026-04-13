@@ -61,9 +61,30 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
 
+  const [isConnected, setIsConnected] = useState(false);
+
   // Initialize Socket
   useEffect(() => {
-    const newSocket = io();
+    const socketUrl = process.env.APP_URL || window.location.origin;
+    const newSocket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+
+    newSocket.on('connect', () => {
+      setIsConnected(true);
+      console.log('Socket connected');
+    });
+
+    newSocket.on('disconnect', () => {
+      setIsConnected(false);
+      console.log('Socket disconnected');
+    });
+
+    newSocket.on('connect_error', (err) => {
+      console.error('Connection error:', err);
+    });
+
     setSocket(newSocket);
     return () => {
       newSocket.close();
@@ -331,18 +352,22 @@ export default function App() {
 
   if (mode === 'receiver') {
     const shareUrl = `${window.location.origin}?mode=sender&room=${roomId}`;
+    const serverUrl = process.env.APP_URL || window.location.origin;
     const pythonScript = `
 import socketio
 import pyautogui
+import time
 
 sio = socketio.Client()
 
 @sio.on('remote-keypress')
 def on_keypress(char):
+    print(f"Typing: {char}")
     pyautogui.write(char)
 
 @sio.on('remote-command')
 def on_command(cmd):
+    print(f"Command: {cmd}")
     if cmd == 'backspace':
         pyautogui.press('backspace')
     elif cmd == 'space':
@@ -350,10 +375,21 @@ def on_command(cmd):
     elif cmd == 'enter':
         pyautogui.press('enter')
 
-print(f"Connecting to room: ${roomId}")
-sio.connect('${window.location.origin}')
-sio.emit('join-room', '${roomId}')
-sio.wait()
+@sio.event
+def connect():
+    print("Connected to server!")
+    sio.emit('join-room', '${roomId}')
+
+@sio.event
+def disconnect():
+    print("Disconnected from server")
+
+try:
+    print(f"Connecting to: ${serverUrl}")
+    sio.connect('${serverUrl}')
+    sio.wait()
+except Exception as e:
+    print(f"Error: {e}")
 `.trim();
 
     return (
@@ -364,10 +400,21 @@ sio.wait()
             <div className="bg-white border border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                  <span className="text-xs font-mono font-bold uppercase tracking-widest">Live Session: {roomId}</span>
+                  <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <span className="text-xs font-mono font-bold uppercase tracking-widest">
+                    {isConnected ? `Live Session: ${roomId}` : 'Disconnected'}
+                  </span>
                 </div>
                 <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      socket?.emit('keypress', { roomId, char: '!' });
+                      setTimeout(() => socket?.emit('command', { roomId, cmd: 'backspace' }), 500);
+                    }}
+                    className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
+                  >
+                    Test Connection
+                  </button>
                   <button onClick={() => sendCommand('clear')} className="p-2 hover:bg-gray-100 rounded transition-colors" title="Clear">
                     <RefreshCw className="w-4 h-4" />
                   </button>
@@ -458,8 +505,11 @@ sio.wait()
       {/* Header */}
       <div className="p-4 border-bottom border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
           <Smartphone className="w-4 h-4 text-gray-500" />
-          <span className="text-[10px] uppercase tracking-widest text-gray-500">Connected to {roomId}</span>
+          <span className="text-[10px] uppercase tracking-widest text-gray-500">
+            {isConnected ? `Connected: ${roomId}` : 'Connecting...'}
+          </span>
         </div>
         <button 
           onClick={() => setMode('choice')}

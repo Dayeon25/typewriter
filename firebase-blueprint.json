@@ -1,0 +1,28 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "A communication room for remote keyboard and mouse control",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "lastEvent": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["keypress", "command", "mouse-move", "mouse-click"] },
+            "data": { "type": "object" },
+            "timestamp": { "type": "number" }
+          }
+        },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Real-time communication channel for a specific room"
+    }
+  }
+}

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Keyboard as KeyboardIcon, 
@@ -16,6 +15,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
+import { db } from './firebase';
+import { 
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  updateDoc, 
+  serverTimestamp,
+  getDoc
+} from 'firebase/firestore';
 
 // --- Keypad Configuration ---
 const KEYPAD_CONFIG = [
@@ -41,7 +49,6 @@ export default function App() {
   const [inputMode, setInputMode] = useState<InputMode>('ko');
   const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
   const [roomId, setRoomId] = useState('');
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [text, setText] = useState('');
   const [composition, setComposition] = useState<string[]>([]);
   const [lastChar, setLastChar] = useState<string | null>(null);
@@ -58,115 +65,109 @@ export default function App() {
     setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
   };
 
-  // Initialize Socket
+  // Initialize Firebase Connection Status
   useEffect(() => {
-    const socketUrl = window.location.origin;
-    addLog(`Connecting to: ${socketUrl}`);
+    if (!roomId) return;
     
-    const newSocket = io(socketUrl, {
-      transports: ['websocket'], // Force websocket as suggested
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      timeout: 20000,
-    });
-
-    newSocket.on('connect', () => {
+    addLog(`Connecting to room: ${roomId}`);
+    
+    const roomRef = doc(db, 'rooms', roomId);
+    
+    // Listen for events (Receiver logic)
+    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setIsConnected(false);
+        return;
+      }
+      
       setIsConnected(true);
       setConnectionError(null);
-      addLog('Connected successfully!');
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      setIsConnected(false);
-      addLog(`Disconnected: ${reason}`);
-    });
-
-    newSocket.on('connect_error', (err) => {
+      
+      const data = snapshot.data();
+      const event = data.lastEvent;
+      
+      if (event && mode === 'receiver') {
+        // Handle events based on type
+        if (event.type === 'keypress') {
+          handleRemoteKeypress(event.data.char);
+        } else if (event.type === 'command') {
+          handleRemoteCommand(event.data.cmd);
+        } else if (event.type === 'mouse-move') {
+          // Mouse move logic (logging for now)
+          console.log('Mouse move:', event.data.dx, event.data.dy);
+        } else if (event.type === 'mouse-click') {
+          console.log('Mouse click:', event.data.button);
+        }
+      }
+    }, (err) => {
       setConnectionError(err.message);
-      addLog(`Connection error: ${err.message}`);
+      addLog(`Firebase error: ${err.message}`);
     });
 
-    setSocket(newSocket);
-    return () => {
-      newSocket.close();
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [roomId, mode]);
 
-  // Handle URL params
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const m = params.get('mode');
-    const r = params.get('room');
-    if (m === 'sender' || m === 'receiver') setMode(m);
-    if (r) setRoomId(r);
-  }, []);
-
-  // Join room
-  useEffect(() => {
-    if (socket?.connected && roomId) {
-      socket.emit('join-room', roomId);
-      addLog(`Joined room: ${roomId}`);
+  const handleRemoteKeypress = (char: string) => {
+    if (char === ' ') {
+      setText(prev => prev + ' ');
+      setComposition([]); 
+      return;
     }
-  }, [socket, roomId, isConnected]);
+    
+    const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(char);
+    
+    if (isKorean) {
+      setComposition(prev => {
+        const next = [...prev, char];
+        const processed = processCheonjiin(next);
+        const assembled = Hangul.assemble(processed);
+        setText(assembled || processed.join(''));
+        return next;
+      });
+    } else {
+      setText(prev => prev + char);
+      setComposition([]); 
+    }
+  };
 
-  // Receiver logic
-  useEffect(() => {
-    if (socket && mode === 'receiver') {
-      socket.on('remote-keypress', (char: string) => {
-        if (char === ' ') {
-          setText(prev => prev + ' ');
-          setComposition([]); 
-          return;
-        }
-        
-        const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(char);
-        
-        if (isKorean) {
-          setComposition(prev => {
-            const next = [...prev, char];
-            const processed = processCheonjiin(next);
-            // If assembly fails or returns empty, show the raw jamos
-            const assembled = Hangul.assemble(processed);
-            setText(assembled || processed.join(''));
-            return next;
-          });
+  const handleRemoteCommand = (cmd: string) => {
+    if (cmd === 'backspace') {
+      setComposition(prev => {
+        if (prev.length > 0) {
+          const next = prev.slice(0, -1);
+          const processed = processCheonjiin(next);
+          const assembled = Hangul.assemble(processed);
+          setText(assembled || processed.join(''));
+          return next;
         } else {
-          setText(prev => prev + char);
-          setComposition([]); 
+          setText(prevText => prevText.slice(0, -1));
+          return [];
         }
       });
-
-      socket.on('remote-command', (cmd: string) => {
-        if (cmd === 'backspace') {
-          setComposition(prev => {
-            if (prev.length > 0) {
-              const next = prev.slice(0, -1);
-              const processed = processCheonjiin(next);
-              const assembled = Hangul.assemble(processed);
-              setText(assembled || processed.join(''));
-              return next;
-            } else {
-              setText(prevText => prevText.slice(0, -1));
-              return [];
-            }
-          });
-        } else if (cmd === 'clear') {
-          setComposition([]);
-          setText('');
-        }
-      });
-
-      socket.on('remote-mouse-move', ({ dx, dy }: { dx: number, dy: number }) => {
-        console.log('Mouse move:', dx, dy);
-      });
+    } else if (cmd === 'clear') {
+      setComposition([]);
+      setText('');
     }
-    return () => {
-      socket?.off('remote-keypress');
-      socket?.off('remote-command');
-      socket?.off('remote-mouse-move');
-    };
-  }, [socket, mode, isConnected]);
+  };
+
+  // Emit Event Helper
+  const emitEvent = async (type: string, data: any) => {
+    if (!roomId) return;
+    try {
+      const roomRef = doc(db, 'rooms', roomId);
+      await setDoc(roomRef, {
+        id: roomId,
+        lastEvent: {
+          type,
+          data,
+          timestamp: Date.now() // Using client timestamp for immediate ordering
+        },
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.error('Emit error:', err);
+    }
+  };
 
   const processCheonjiin = (jamos: string[]) => {
     const result: string[] = [];
@@ -227,7 +228,7 @@ export default function App() {
   };
 
   const handleKeyClick = (keyId: string) => {
-    if (!socket || !roomId) return;
+    if (!roomId) return;
 
     const config = KEYPAD_CONFIG.find(k => k.id === keyId);
     if (!config) return;
@@ -244,7 +245,7 @@ export default function App() {
     }
 
     if (chars[0] === 'backspace') {
-      socket.emit('command', { roomId, cmd: 'backspace' });
+      emitEvent('command', { cmd: 'backspace' });
       setLastChar(null);
       setTapCount(0);
       return;
@@ -254,10 +255,10 @@ export default function App() {
 
     if (lastChar === keyId && !isVowel && inputMode !== 'num') {
       // Multi-tap
-      socket.emit('command', { roomId, cmd: 'backspace' });
+      emitEvent('command', { cmd: 'backspace' });
       const nextTap = (tapCount + 1) % chars.length;
       setTapCount(nextTap);
-      socket.emit('keypress', { roomId, char: chars[nextTap] });
+      emitEvent('keypress', { char: chars[nextTap] });
       
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = setTimeout(() => {
@@ -269,7 +270,7 @@ export default function App() {
       if (tapTimer.current) clearTimeout(tapTimer.current);
       setLastChar(keyId);
       setTapCount(0);
-      socket.emit('keypress', { roomId, char: chars[0] });
+      emitEvent('keypress', { char: chars[0] });
       
       if (!isVowel && inputMode !== 'num') {
         tapTimer.current = setTimeout(() => {
@@ -281,15 +282,27 @@ export default function App() {
     }
   };
 
-  const generateRoom = () => {
+  const generateRoom = async () => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     setRoomId(id);
     setMode('receiver');
     window.history.pushState({}, '', `?mode=receiver&room=${id}`);
+    
+    // Create room in Firestore
+    try {
+      await setDoc(doc(db, 'rooms', id), {
+        id,
+        createdAt: serverTimestamp(),
+        lastEvent: null
+      });
+      addLog(`Room created: ${id}`);
+    } catch (err) {
+      console.error('Room creation error:', err);
+    }
   };
 
   const sendCommand = (cmd: string) => {
-    socket?.emit('command', { roomId, cmd });
+    emitEvent('command', { cmd });
   };
 
   const copyToClipboard = () => {
@@ -357,53 +370,61 @@ export default function App() {
     const shareUrl = `${window.location.origin}?mode=sender&room=${roomId}`;
     const serverUrl = window.location.origin;
     const pythonScript = `
-import socketio
+import firebase_admin
+from firebase_admin import credentials, firestore
 import pyautogui
 import time
+import threading
 
-sio = socketio.Client()
-
-@sio.on('remote-keypress')
-def on_keypress(char):
-    print(f"Typing: {char}")
-    pyautogui.write(char)
-
-@sio.on('remote-command')
-def on_command(cmd):
-    print(f"Command: {cmd}")
-    if cmd == 'backspace':
-        pyautogui.press('backspace')
-    elif cmd == 'space':
-        pyautogui.press('space')
-    elif cmd == 'enter':
-        pyautogui.press('enter')
-
-@sio.on('remote-mouse-move')
-def on_mouse_move(data):
-    dx = data.get('dx', 0)
-    dy = data.get('dy', 0)
-    pyautogui.moveRel(dx * 2, dy * 2)
-
-@sio.on('remote-mouse-click')
-def on_mouse_click(data):
-    button = data.get('button', 'left')
-    pyautogui.click(button=button)
-
-@sio.event
-def connect():
-    print("Connected to server!")
-    sio.emit('join-room', '${roomId}')
-
-@sio.event
-def disconnect():
-    print("Disconnected from server")
-
+# 1. Download your service account key from Firebase Console
+# 2. Rename it to 'serviceAccountKey.json' and put it in the same folder
 try:
-    print(f"Connecting to: ${serverUrl}")
-    sio.connect('${serverUrl}')
-    sio.wait()
+    cred = credentials.Certificate('serviceAccountKey.json')
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"Error initializing Firebase: {e}")
+    print("Please make sure 'serviceAccountKey.json' exists in the same folder.")
+    exit()
+
+room_id = '${roomId}'
+print(f"Monitoring Room: {room_id}")
+
+def on_snapshot(doc_snapshot, changes, read_time):
+    for doc in doc_snapshot:
+        data = doc.to_dict()
+        event = data.get('lastEvent')
+        if not event: continue
+        
+        etype = event.get('type')
+        edata = event.get('data', {})
+        
+        if etype == 'keypress':
+            char = edata.get('char')
+            print(f"Typing: {char}")
+            pyautogui.write(char)
+        elif etype == 'command':
+            cmd = edata.get('cmd')
+            print(f"Command: {cmd}")
+            if cmd == 'backspace': pyautogui.press('backspace')
+            elif cmd == 'space': pyautogui.press('space')
+            elif cmd == 'enter': pyautogui.press('enter')
+        elif etype == 'mouse-move':
+            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+            pyautogui.moveRel(dx * 2, dy * 2)
+        elif etype == 'mouse-click':
+            btn = edata.get('button', 'left')
+            pyautogui.click(button=btn)
+
+doc_ref = db.collection('rooms').document(room_id)
+doc_watch = doc_ref.on_snapshot(on_snapshot)
+
+print("Connected and waiting for events...")
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    pass
 `.trim();
 
     return (
@@ -428,8 +449,8 @@ except Exception as e:
                   </button>
                   <button 
                     onClick={() => {
-                      socket?.emit('keypress', { roomId, char: '!' });
-                      setTimeout(() => socket?.emit('command', { roomId, cmd: 'backspace' }), 500);
+                      emitEvent('keypress', { char: '!' });
+                      setTimeout(() => emitEvent('command', { cmd: 'backspace' }), 500);
                     }}
                     className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
                   >
@@ -464,11 +485,11 @@ except Exception as e:
                   <ol className="list-decimal list-inside space-y-2">
                     <li>Python 설치 후 터미널에서 실행:<br/>
                       <code className="bg-white/10 text-blue-300 px-2 py-1 rounded mt-1 inline-block not-italic font-mono text-[10px]">
-                        pip install pyautogui python-socketio[client]
+                        pip install pyautogui firebase-admin
                       </code>
                     </li>
-                    <li>오른쪽 코드를 <code className="text-white">helper.py</code>로 저장하고 실행합니다.</li>
-                    <li>이제 핸드폰으로 치는 내용이 현재 포커스된 창에 입력됩니다!</li>
+                    <li>Firebase 콘솔에서 <b>서비스 계정 키(JSON)</b>를 다운로드하여 <code className="text-white">serviceAccountKey.json</code>으로 저장합니다.</li>
+                    <li>오른쪽 코드를 <code className="text-white">helper.py</code>로 저장하고 같은 폴더에서 실행합니다.</li>
                   </ol>
                 </div>
                 
@@ -532,13 +553,13 @@ except Exception as e:
   }
 
   // Sender (Mobile Keyboard)
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (activeTab !== 'mouse' || !socket || !roomId) return;
+  const handleTouchMove = (e: any) => {
+    if (activeTab !== 'mouse' || !roomId) return;
     const touch = e.touches[0];
     if (mouseRef.current.x !== 0 && mouseRef.current.y !== 0) {
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
-      socket.emit('mouse-move', { roomId, dx, dy });
+      emitEvent('mouse-move', { dx, dy });
     }
     mouseRef.current = { x: touch.clientX, y: touch.clientY };
   };
@@ -652,13 +673,13 @@ except Exception as e:
               <div className="absolute bottom-6 left-6 right-6 h-24 flex gap-4">
                 <button 
                   className="flex-1 bg-white/5 border border-white/10 rounded-2xl active:bg-white/20 transition-colors flex items-center justify-center font-bold uppercase tracking-widest text-xs"
-                  onClick={() => socket?.emit('mouse-click', { roomId, button: 'left' })}
+                  onClick={() => emitEvent('mouse-click', { button: 'left' })}
                 >
                   Left
                 </button>
                 <button 
                   className="flex-1 bg-white/5 border border-white/10 rounded-2xl active:bg-white/20 transition-colors flex items-center justify-center font-bold uppercase tracking-widest text-xs"
-                  onClick={() => socket?.emit('mouse-click', { roomId, button: 'right' })}
+                  onClick={() => emitEvent('mouse-click', { button: 'right' })}
                 >
                   Right
                 </button>

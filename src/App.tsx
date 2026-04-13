@@ -15,24 +15,27 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 
-// --- Cheonjiin Logic Constants ---
-const CHEONJIIN_KEYS = [
-  { id: '1', label: 'ㅣ', chars: ['ㅣ'] },
-  { id: '2', label: 'ㆍ', chars: ['ㆍ'] },
-  { id: '3', label: 'ㅡ', chars: ['ㅡ'] },
-  { id: '4', label: 'ㄱㅋ', chars: ['ㄱ', 'ㅋ', 'ㄲ'] },
-  { id: '5', label: 'ㄴㄹ', chars: ['ㄴ', 'ㄹ'] },
-  { id: '6', label: 'ㄷㅌ', chars: ['ㄷ', 'ㅌ', 'ㄸ'] },
-  { id: '7', label: 'ㅂㅍ', chars: ['ㅂ', 'ㅍ', 'ㅃ'] },
-  { id: '8', label: 'ㅅㅎ', chars: ['ㅅ', 'ㅎ'] },
-  { id: '9', label: 'ㅈㅊ', chars: ['ㅈ', 'ㅊ', 'ㅉ'] },
-  { id: '*', label: 'ㅇㅁ', chars: ['ㅇ', 'ㅁ'] },
-  { id: '0', label: '공백', chars: [' '] },
-  { id: '#', label: '삭제', chars: ['backspace'] },
+// --- Keypad Configuration ---
+const KEYPAD_CONFIG = [
+  { id: '1', label: 'ㅣ', ko: ['ㅣ'], en: ['a', 'b', 'c'], num: ['1'] },
+  { id: '2', label: 'ㆍ', ko: ['ㆍ'], en: ['d', 'e', 'f'], num: ['2'] },
+  { id: '3', label: 'ㅡ', ko: ['ㅡ'], en: ['g', 'h', 'i'], num: ['3'] },
+  { id: '4', label: 'ㄱㅋ', ko: ['ㄱ', 'ㅋ', 'ㄲ'], en: ['j', 'k', 'l'], num: ['4'] },
+  { id: '5', label: 'ㄴㄹ', ko: ['ㄴ', 'ㄹ'], en: ['m', 'n', 'o'], num: ['5'] },
+  { id: '6', label: 'ㄷㅌ', ko: ['ㄷ', 'ㅌ', 'ㄸ'], en: ['p', 'q', 'r', 's'], num: ['6'] },
+  { id: '7', label: 'ㅂㅍ', ko: ['ㅂ', 'ㅍ', 'ㅃ'], en: ['t', 'u', 'v'], num: ['7'] },
+  { id: '8', label: 'ㅅㅎ', ko: ['ㅅ', 'ㅎ'], en: ['w', 'x', 'y', 'z'], num: ['8'] },
+  { id: '9', label: 'ㅈㅊ', ko: ['ㅈ', 'ㅊ', 'ㅉ'], en: ['.', ',', '!', '?'], num: ['9'] },
+  { id: '*', label: '한/영/123', ko: ['mode'], en: ['mode'], num: ['mode'] },
+  { id: '0', label: 'ㅇㅁ', ko: ['ㅇ', 'ㅁ'], en: [' '], num: ['0'] },
+  { id: '#', label: '삭제', ko: ['backspace'], en: ['backspace'], num: ['backspace'] },
 ];
+
+type InputMode = 'ko' | 'en' | 'num';
 
 export default function App() {
   const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>('choice');
+  const [inputMode, setInputMode] = useState<InputMode>('ko');
   const [roomId, setRoomId] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [text, setText] = useState('');
@@ -85,22 +88,41 @@ export default function App() {
   useEffect(() => {
     if (socket && mode === 'receiver') {
       socket.on('remote-keypress', (char: string) => {
-        setComposition(prev => {
-          const next = [...prev, char];
-          const processed = processCheonjiin(next);
-          const assembled = Hangul.assemble(processed);
-          setText(assembled);
-          return next;
-        });
-      });
-      socket.on('remote-command', (cmd: string) => {
-        if (cmd === 'backspace') {
+        if (char === ' ') {
+          setText(prev => prev + ' ');
+          setComposition([]); 
+          return;
+        }
+        
+        const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(char);
+        
+        if (isKorean) {
           setComposition(prev => {
-            const next = prev.slice(0, -1);
+            const next = [...prev, char];
             const processed = processCheonjiin(next);
             const assembled = Hangul.assemble(processed);
             setText(assembled);
             return next;
+          });
+        } else {
+          setText(prev => prev + char);
+          setComposition([]); 
+        }
+      });
+
+      socket.on('remote-command', (cmd: string) => {
+        if (cmd === 'backspace') {
+          setComposition(prev => {
+            if (prev.length > 0) {
+              const next = prev.slice(0, -1);
+              const processed = processCheonjiin(next);
+              const assembled = Hangul.assemble(processed);
+              setText(assembled);
+              return next;
+            } else {
+              setText(prevText => prevText.slice(0, -1));
+              return [];
+            }
           });
         } else if (cmd === 'clear') {
           setComposition([]);
@@ -184,27 +206,38 @@ export default function App() {
     return seq.split('');
   };
 
-  const handleKeyClick = (keyId: string, chars: string[]) => {
+  const handleKeyClick = (keyId: string) => {
     if (!socket || !roomId) return;
 
-    if (keyId === '#') {
+    const config = KEYPAD_CONFIG.find(k => k.id === keyId);
+    if (!config) return;
+
+    const chars = config[inputMode];
+
+    if (chars[0] === 'mode') {
+      const modes: InputMode[] = ['ko', 'en', 'num'];
+      const nextMode = modes[(modes.indexOf(inputMode) + 1) % modes.length];
+      setInputMode(nextMode);
+      setLastChar(null);
+      setTapCount(0);
+      return;
+    }
+
+    if (chars[0] === 'backspace') {
       socket.emit('command', { roomId, cmd: 'backspace' });
-      return;
-    }
-    if (keyId === '0') {
-      socket.emit('keypress', { roomId, char: ' ' });
+      setLastChar(null);
+      setTapCount(0);
       return;
     }
 
-    const isVowel = ['1', '2', '3'].includes(keyId);
+    const isVowel = inputMode === 'ko' && ['1', '2', '3'].includes(keyId);
 
-    if (lastChar === keyId && !isVowel) {
-      // Consonant multi-tap: delete previous and send next
+    if (lastChar === keyId && !isVowel && inputMode !== 'num') {
+      // Multi-tap
       socket.emit('command', { roomId, cmd: 'backspace' });
       const nextTap = (tapCount + 1) % chars.length;
       setTapCount(nextTap);
-      const char = chars[nextTap];
-      socket.emit('keypress', { roomId, char });
+      socket.emit('keypress', { roomId, char: chars[nextTap] });
       
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = setTimeout(() => {
@@ -212,21 +245,17 @@ export default function App() {
         setTapCount(0);
       }, 800);
     } else {
-      // New key or vowel
+      // New key
       if (tapTimer.current) clearTimeout(tapTimer.current);
-      
       setLastChar(keyId);
       setTapCount(0);
-      const char = chars[0];
-      socket.emit('keypress', { roomId, char });
+      socket.emit('keypress', { roomId, char: chars[0] });
       
-      if (!isVowel) {
+      if (!isVowel && inputMode !== 'num') {
         tapTimer.current = setTimeout(() => {
           setLastChar(null);
         }, 800);
       } else {
-        // Vowels don't need multi-tap timeout in the same way, 
-        // but we reset lastChar to allow immediate re-entry of same vowel if needed
         setLastChar(null);
       }
     }
@@ -477,9 +506,11 @@ except Exception as e:
       <div className="flex-1 flex flex-col items-center justify-center p-8">
         <div className="text-center">
           <div className="text-4xl font-medium mb-2 min-h-[1.2em] text-blue-400">
-            {lastChar ? CHEONJIIN_KEYS.find(k => k.id === lastChar)?.chars[tapCount] : ' '}
+            {lastChar ? KEYPAD_CONFIG.find(k => k.id === lastChar)?.[inputMode][tapCount] : ' '}
           </div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Current Input</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">
+            {inputMode === 'ko' ? '한글 입력' : inputMode === 'en' ? 'English' : 'Numbers'}
+          </div>
         </div>
         
         <div className="mt-12 flex gap-4">
@@ -494,42 +525,19 @@ except Exception as e:
 
       {/* Cheonjiin Keyboard */}
       <div className="bg-[#1c1d21] p-2 pb-8 grid grid-cols-3 gap-2">
-        {CHEONJIIN_KEYS.map((key) => (
+        {KEYPAD_CONFIG.map((key) => (
           <motion.button
             key={key.id}
             whileTap={{ scale: 0.95, backgroundColor: '#2a2b30' }}
-            onClick={() => handleKeyClick(key.id, key.chars)}
-            className="h-20 bg-[#232429] rounded-xl flex flex-col items-center justify-center border border-white/5 shadow-lg"
+            onClick={() => handleKeyClick(key.id)}
+            className={`h-20 rounded-xl flex flex-col items-center justify-center border border-white/5 shadow-lg ${
+              key.id === '*' ? 'bg-blue-900/40 border-blue-500/30' : 'bg-[#232429]'
+            }`}
           >
             <span className="text-2xl font-bold">{key.id}</span>
             <span className="text-[10px] text-gray-500 mt-1">{key.label}</span>
           </motion.button>
         ))}
-        
-        {/* Special Keys */}
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => sendCommand('backspace')}
-          className="h-20 bg-[#232429] rounded-xl flex items-center justify-center border border-white/5"
-        >
-          <Delete className="w-6 h-6 text-red-400" />
-        </motion.button>
-
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => sendCommand('space')}
-          className="h-20 bg-[#232429] rounded-xl flex items-center justify-center border border-white/5"
-        >
-          <Space className="w-6 h-6 text-gray-400" />
-        </motion.button>
-
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={() => sendCommand('enter')}
-          className="h-20 bg-[#232429] rounded-xl flex items-center justify-center border border-white/5"
-        >
-          <CornerDownLeft className="w-6 h-6 text-blue-400" />
-        </motion.button>
       </div>
 
       {/* Bottom Bar */}

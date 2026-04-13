@@ -60,15 +60,15 @@ export default function App() {
 
   // Initialize Socket
   useEffect(() => {
-    addLog(`Connecting to server...`);
+    const socketUrl = window.location.origin;
+    addLog(`Connecting to: ${socketUrl}`);
     
-    // Using default io() call which uses current host and path
-    const newSocket = io({
-      transports: ['polling', 'websocket'], // Allow both, starting with polling
+    const newSocket = io(socketUrl, {
+      transports: ['websocket'], // Force websocket as suggested
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      timeout: 10000,
+      timeout: 20000,
     });
 
     newSocket.on('connect', () => {

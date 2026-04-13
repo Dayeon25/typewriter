@@ -14,7 +14,10 @@ async function startServer() {
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
+      methods: ["GET", "POST"],
+      credentials: true
     },
+    allowEIO3: true
   });
 
   const PORT = 3000;

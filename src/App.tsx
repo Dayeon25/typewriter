@@ -58,6 +58,7 @@ export default function App() {
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
+  const backspaceInterval = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -318,6 +319,21 @@ export default function App() {
       } else {
         setLastChar(null);
       }
+    }
+  };
+
+  const startBackspace = () => {
+    if (backspaceInterval.current) return;
+    handleKeyClick('backspace');
+    backspaceInterval.current = setInterval(() => {
+      handleKeyClick('backspace');
+    }, 150);
+  };
+
+  const stopBackspace = () => {
+    if (backspaceInterval.current) {
+      clearInterval(backspaceInterval.current);
+      backspaceInterval.current = null;
     }
   };
 
@@ -675,37 +691,38 @@ except KeyboardInterrupt:
             </div>
 
             {/* Galaxy Style Keyboard */}
-            <div className="bg-[#D1D3D9] p-2 pb-10">
+            <div className="bg-[#D1D3D9] p-1.5 pb-8">
               {inputMode === 'sym' ? (
-                <div className="grid grid-cols-5 gap-2">
+                <div className="grid grid-cols-5 gap-1.5">
                   {SYMBOL_CONFIG.map(sym => (
                     <button
                       key={sym}
                       onClick={() => handleKeyClick(sym)}
-                      className="h-12 bg-white rounded-lg shadow-sm flex items-center justify-center text-lg active:bg-gray-200"
+                      className="h-11 bg-white rounded-lg shadow-sm flex items-center justify-center text-lg active:bg-gray-200"
                     >
                       {sym}
                     </button>
                   ))}
                   <button 
                     onClick={() => setInputMode('ko')}
-                    className="col-span-5 h-12 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
+                    className="col-span-5 h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
                   >
                     뒤로가기
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-1.5">
                   {/* Row 1-3: Main Keys */}
                   {KEYPAD_CONFIG.slice(0, 9).map(key => (
                     <button
                       key={key.id}
                       onClick={() => handleKeyClick(key.id)}
-                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors"
+                      className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors relative overflow-hidden"
                     >
-                      <span className="text-2xl font-bold text-gray-800">{key.label}</span>
+                      <span className="absolute top-1 right-1.5 text-[8px] font-bold text-gray-300">{key.id}</span>
+                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
                       {inputMode === 'en' && (
-                        <span className="text-[9px] text-gray-400 uppercase font-bold tracking-tighter">
+                        <span className="text-[8px] text-gray-400 uppercase font-bold tracking-tighter">
                           {key.en.join('')}
                         </span>
                       )}
@@ -715,41 +732,46 @@ except KeyboardInterrupt:
                   {/* Row 4: Symbols, ㅇㅁ (Center), Backspace */}
                   <button 
                     onClick={() => setInputMode('sym')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
+                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold active:bg-gray-400"
                   >
                     !#1
                   </button>
                   <button 
                     onClick={() => handleKeyClick('0')}
-                    className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200"
+                    className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 relative"
                   >
-                    <span className="text-2xl font-bold text-gray-800">ㅇㅁ</span>
+                    <span className="absolute top-1 right-1.5 text-[8px] font-bold text-gray-300">0</span>
+                    <span className="text-xl font-bold text-gray-800">ㅇㅁ</span>
                   </button>
                   <button 
-                    onClick={() => handleKeyClick('backspace')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
+                    onMouseDown={startBackspace}
+                    onMouseUp={stopBackspace}
+                    onMouseLeave={stopBackspace}
+                    onTouchStart={startBackspace}
+                    onTouchEnd={stopBackspace}
+                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
                   >
-                    <Delete className="w-6 h-6" />
+                    <Delete className="w-5 h-5" />
                   </button>
 
                   {/* Row 5: Mode, Space, Enter */}
                   <button 
                     onClick={() => handleKeyClick('mode')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400"
+                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400"
                   >
                     한/영
                   </button>
                   <button 
                     onClick={() => handleKeyClick('space')}
-                    className="h-16 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200"
+                    className="h-14 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200"
                   >
-                    <Space className="w-7 h-7" />
+                    <Space className="w-6 h-6" />
                   </button>
                   <button 
                     onClick={() => handleKeyClick('enter')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
+                    className="h-14 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400"
                   >
-                    <CornerDownLeft className="w-6 h-6" />
+                    <CornerDownLeft className="w-5 h-5" />
                   </button>
                 </div>
               )}

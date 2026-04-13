@@ -48,33 +48,44 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   
   // Mouse state
   const mouseRef = useRef({ x: 0, y: 0 });
 
+  const addLog = (msg: string) => {
+    setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
+  };
+
   // Initialize Socket
   useEffect(() => {
-    // Force the socket to use the current origin and explicit path if needed
-    const socketUrl = window.location.origin;
+    // Try APP_URL first, then current origin
+    const socketUrl = (process.env.APP_URL || window.location.origin).replace(/\/$/, "");
+    addLog(`Connecting to: ${socketUrl}`);
+    
     const newSocket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'], // Try polling first for better compatibility
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      timeout: 20000,
     });
 
     newSocket.on('connect', () => {
       setIsConnected(true);
-      console.log('Socket connected:', newSocket.id);
+      setConnectionError(null);
+      addLog('Connected successfully!');
     });
 
-    newSocket.on('disconnect', () => {
+    newSocket.on('disconnect', (reason) => {
       setIsConnected(false);
-      console.log('Socket disconnected');
+      addLog(`Disconnected: ${reason}`);
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err);
+      setConnectionError(err.message);
+      addLog(`Connection error: ${err.message}`);
     });
 
     setSocket(newSocket);
@@ -94,10 +105,11 @@ export default function App() {
 
   // Join room
   useEffect(() => {
-    if (socket && roomId) {
+    if (socket?.connected && roomId) {
       socket.emit('join-room', roomId);
+      addLog(`Joined room: ${roomId}`);
     }
-  }, [socket, roomId]);
+  }, [socket, roomId, isConnected]);
 
   // Receiver logic
   useEffect(() => {
@@ -405,22 +417,24 @@ except Exception as e:
                 <div className="flex items-center gap-2">
                   <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></div>
                   <span className="text-xs font-mono font-bold uppercase tracking-widest">
-                    {isConnected ? `Live Session: ${roomId}` : 'Connecting to Server...'}
+                    {isConnected ? `Live Session: ${roomId}` : connectionError ? `Error: ${connectionError}` : 'Connecting...'}
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <button 
+                    onClick={() => window.location.reload()}
+                    className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
+                  >
+                    새로고침
+                  </button>
+                  <button 
                     onClick={() => {
-                      if (!socket?.connected) {
-                        window.location.reload();
-                        return;
-                      }
                       socket?.emit('keypress', { roomId, char: '!' });
                       setTimeout(() => socket?.emit('command', { roomId, cmd: 'backspace' }), 500);
                     }}
                     className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
                   >
-                    {isConnected ? 'Test Connection' : 'Reconnect'}
+                    연결 테스트
                   </button>
                   <button onClick={() => sendCommand('clear')} className="p-2 hover:bg-gray-100 rounded transition-colors" title="Clear">
                     <RefreshCw className="w-4 h-4" />
@@ -488,19 +502,27 @@ except Exception as e:
             </div>
 
             <div className="bg-white border border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
-              <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">도움말 & 방 코드 안내</h3>
+              <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">연결이 안 되나요? (해결 방법)</h3>
               <div className="space-y-4 text-xs text-gray-600">
+                <div className="p-3 bg-red-50 border border-red-100 rounded">
+                  <p className="font-bold text-red-800 mb-1">초록불이 안 들어올 때:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>인터넷 연결을 확인하고 <b>새로고침</b> 버튼을 눌러주세요.</li>
+                    <li>공공 와이파이나 회사 보안망에서는 차단될 수 있습니다.</li>
+                    <li>브라우저를 껐다 켜보거나 다른 브라우저(크롬 등)를 써보세요.</li>
+                  </ul>
+                </div>
                 <div className="p-3 bg-blue-50 border border-blue-100 rounded">
                   <p className="font-bold text-blue-800 mb-1">방 코드가 무엇인가요?</p>
                   <p>내 핸드폰과 컴퓨터를 1:1로 안전하게 연결해주는 '비밀 번호'입니다. 이 코드가 있어야 다른 사람이 내 컴퓨터에 타이핑하는 것을 막을 수 있습니다.</p>
                 </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">1</div>
-                  <p>모음(ㅣ, ㆍ, ㅡ)은 여러 번 눌러 조합할 수 있습니다. (예: ㆍ + ㅣ = ㅏ)</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">2</div>
-                  <p>상단 마우스 아이콘을 누르면 핸드폰을 트랙패드로 쓸 수 있습니다.</p>
+              </div>
+              
+              {/* Debug Log */}
+              <div className="mt-6">
+                <p className="text-[10px] font-bold uppercase opacity-30 mb-2">Connection Logs</p>
+                <div className="bg-gray-900 text-green-400 p-3 rounded font-mono text-[10px] h-24 overflow-y-auto">
+                  {debugLog.map((log, i) => <div key={i}>{log}</div>)}
                 </div>
               </div>
             </div>

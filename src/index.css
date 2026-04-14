@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+:root {
+  --vh: 1vh;
+}
+
+.h-screen-fix {
+  height: calc(var(--vh, 1vh) * 100);
+}

@@ -50,12 +50,31 @@ type InputMode = 'ko' | 'en' | 'num' | 'sym';
 type MobileTab = 'keyboard' | 'mouse';
 
 export default function App() {
-  const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>('choice');
+  const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>(() => {
+    if (typeof window === 'undefined') return 'choice';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const modeParam = params.get('mode');
+      if (modeParam === 'sender' || modeParam === 'receiver') return modeParam as any;
+    } catch (e) {
+      console.error("Mode init error", e);
+    }
+    return 'choice';
+  });
   const [inputMode, setInputMode] = useState<InputMode>('ko');
   const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
   const [isAirMouseActive, setIsAirMouseActive] = useState(false);
   const [mouseSensitivity, setMouseSensitivity] = useState(1.5);
-  const [roomId, setRoomId] = useState('');
+  const [roomId, setRoomId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('room') || '';
+    } catch (e) {
+      console.error("RoomId init error", e);
+      return '';
+    }
+  });
   const [committedText, setCommittedText] = useState('');
   const [composition, setComposition] = useState<string[]>([]);
   const [lastChar, setLastChar] = useState<string | null>(null);
@@ -65,7 +84,30 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [hasError, setHasError] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<string>('');
   
+  // Viewport Height Fix for Mobile
+  useEffect(() => {
+    const setVh = () => {
+      let vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    };
+    setVh();
+    window.addEventListener('resize', setVh);
+    return () => window.removeEventListener('resize', setVh);
+  }, []);
+
+  // Global Error Listener
+  useEffect(() => {
+    const handleError = (e: ErrorEvent) => {
+      setHasError(true);
+      setErrorInfo(e.message);
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
   // Mouse state
   const mouseRef = useRef({ x: 0, y: 0 });
   const lastMouseMoveTime = useRef(0);
@@ -73,19 +115,6 @@ export default function App() {
   const addLog = (msg: string) => {
     setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
   };
-
-  // Handle URL Parameters for Auto-Connect
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    const modeParam = params.get('mode');
-
-    if (roomParam && (modeParam === 'sender' || modeParam === 'receiver')) {
-      setRoomId(roomParam);
-      setMode(modeParam as any);
-      addLog(`Auto-connecting to ${roomParam} as ${modeParam}`);
-    }
-  }, []);
 
   // Initialize Firebase Connection Status
   useEffect(() => {
@@ -492,15 +521,15 @@ except KeyboardInterrupt:
               <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-400">OR</span></div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-widest opacity-50">방 코드 입력</label>
+            <div className="space-y-3">
+              <label className="text-xs font-bold uppercase tracking-widest opacity-50 block">방 코드 직접 입력</label>
               <div className="flex gap-2">
                 <input 
                   type="text" 
-                  placeholder="CODE"
+                  placeholder="예: ABCDEF"
                   value={roomId}
                   onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-                  className="flex-1 p-3 border border-[#141414] font-mono focus:outline-none focus:ring-2 focus:ring-[#141414]"
+                  className="flex-1 p-4 border-2 border-[#141414] font-mono text-lg focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg"
                 />
                 <button 
                   onClick={() => {
@@ -509,11 +538,12 @@ except KeyboardInterrupt:
                       window.history.pushState({}, '', `?mode=sender&room=${roomId}`);
                     }
                   }}
-                  className="p-3 bg-[#141414] text-white hover:bg-gray-800 transition-colors"
+                  className="px-6 bg-[#141414] text-white hover:bg-gray-800 transition-all active:scale-95 rounded-lg flex items-center justify-center shadow-lg"
                 >
                   <Smartphone className="w-6 h-6" />
                 </button>
               </div>
+              <p className="text-[10px] text-gray-400 text-center italic">QR 코드가 안 될 경우 코드를 직접 입력하세요</p>
             </div>
           </div>
         </motion.div>
@@ -522,7 +552,11 @@ except KeyboardInterrupt:
   }
 
   if (mode === 'receiver') {
-    const shareUrl = `${window.location.origin}?mode=sender&room=${roomId}`;
+    const getBaseUrl = () => {
+      const url = new URL(window.location.href);
+      return url.origin + url.pathname;
+    };
+    const shareUrl = `${getBaseUrl()}?mode=sender&room=${roomId}`;
     const pythonScript = getPythonScript();
 
     return (
@@ -708,14 +742,37 @@ except KeyboardInterrupt:
     mouseRef.current = { x: 0, y: 0 };
   };
 
+  if (hasError) {
+    return (
+      <div className="min-h-screen bg-red-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-red-200 max-w-sm">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Info className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">오류가 발생했습니다</h2>
+          <p className="text-sm text-gray-600 mb-6">화면을 불러오는 중 문제가 발생했습니다. 아래 버튼을 눌러 다시 시도해 주세요.</p>
+          <button 
+            onClick={() => window.location.href = window.location.origin}
+            className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+          >
+            처음으로 돌아가기
+          </button>
+          <div className="mt-4 text-[10px] text-gray-400 font-mono break-all">
+            {errorInfo}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-[#F2F2F2] flex flex-col font-sans text-[#1c1d21] overflow-hidden select-none touch-none">
+    <div className="fixed inset-0 min-h-screen h-screen-fix bg-[#F2F2F2] flex flex-col font-sans text-[#1c1d21] overflow-hidden select-none touch-none">
       {/* Header */}
-      <div className="p-3 flex items-center justify-between bg-white border-b border-gray-200">
+      <div className="p-3 flex items-center justify-between bg-white border-b border-gray-200 shrink-0">
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-            {isConnected ? `ROOM: ${roomId}` : 'CONNECTING...'}
+            {roomId ? `ROOM: ${roomId}` : 'NO ROOM'}
           </span>
         </div>
         <div className="flex gap-2">
@@ -737,204 +794,223 @@ except KeyboardInterrupt:
         </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'keyboard' ? (
-          <motion.div 
-            key="keyboard"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col"
+      {!roomId ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white">
+          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+            <Smartphone className="w-10 h-10 text-gray-400" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">연결 정보가 없습니다</h2>
+          <p className="text-sm text-gray-500 mb-8">컴퓨터 화면의 코드를 입력하거나 QR 코드를 다시 찍어주세요.</p>
+          <button 
+            onClick={() => setMode('choice')}
+            className="w-full py-4 bg-[#141414] text-white rounded-xl font-bold shadow-lg"
           >
-            {/* Preview */}
-            <div className="flex-1 flex items-center justify-center p-4 bg-white/50">
-              <div className="text-center">
-                <div className="text-4xl font-light text-gray-800 min-h-[1.2em]">
-                  {(() => {
-                    const processed = processCheonjiin(composition);
-                    const assembled = Hangul.assemble(processed);
-                    return assembled || processed.join('') || ' ';
-                  })()}
-                </div>
-                <div className="text-[10px] text-blue-500 font-bold uppercase mt-2">
-                  {inputMode === 'ko' ? '한글' : inputMode === 'en' ? 'English' : inputMode === 'num' ? '숫자' : '기호'}
-                </div>
-              </div>
-            </div>
-
-            {/* Galaxy Style Keyboard */}
-            <div className="bg-[#D1D3D9] p-1 pb-4">
-              {inputMode === 'sym' ? (
-                <div className="grid grid-cols-5 gap-1">
-                  {SYMBOL_CONFIG.map(sym => (
-                    <button
-                      key={sym}
-                      onClick={() => handleKeyClick(sym)}
-                      className="h-9 bg-white rounded-md shadow-sm flex items-center justify-center text-sm active:bg-gray-200"
-                    >
-                      {sym}
-                    </button>
-                  ))}
-                  <button 
-                    onClick={() => setInputMode('ko')}
-                    className="col-span-5 h-9 bg-[#B0B3BC] rounded-md shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
-                  >
-                    뒤로가기
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-1">
-                  {/* Row 1-3: Main Keys */}
-                  {KEYPAD_CONFIG.slice(0, 9).map(key => (
-                    <button
-                      key={key.id}
-                      onClick={() => handleKeyClick(key.id)}
-                      className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors relative overflow-hidden"
-                    >
-                      <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">{key.id}</span>
-                      <span className="text-base font-bold text-gray-800">{key.label}</span>
-                      {inputMode === 'en' && (
-                        <span className="text-[7px] text-gray-400 uppercase font-bold tracking-tighter">
-                          {key.en.join('')}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-
-                  {/* Row 4: Symbols, ㅇㅁ (Center), Backspace */}
-                  <button 
-                    onClick={() => setInputMode('sym')}
-                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
-                  >
-                    !#1
-                  </button>
-                  <button 
-                    onClick={() => handleKeyClick('0')}
-                    className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 relative"
-                  >
-                    <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">0</span>
-                    <span className="text-base font-bold text-gray-800">ㅇㅁ</span>
-                  </button>
-                  <button 
-                    onMouseDown={startBackspace}
-                    onMouseUp={stopBackspace}
-                    onMouseLeave={stopBackspace}
-                    onTouchStart={startBackspace}
-                    onTouchEnd={stopBackspace}
-                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
-                  >
-                    <Delete className="w-4 h-4" />
-                  </button>
-
-                  {/* Row 5: Mode, Space, Enter */}
-                  <button 
-                    onClick={() => handleKeyClick('mode')}
-                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[9px] font-bold active:bg-gray-400"
-                  >
-                    한/영
-                  </button>
-                  <button 
-                    onClick={() => handleKeyClick('space')}
-                    className="h-11 bg-white rounded-lg shadow-sm flex items-center justify-center active:bg-gray-200"
-                  >
-                    <Space className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={() => handleKeyClick('enter')}
-                    className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
-                  >
-                    <CornerDownLeft className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div 
-            key="mouse"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col p-4 gap-4"
-          >
-            {/* Sensitivity & Air Mouse Controls */}
-            <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sensitivity</div>
-                <input 
-                  type="range" 
-                  min="0.5" 
-                  max="5" 
-                  step="0.1" 
-                  value={mouseSensitivity}
-                  onChange={(e) => setMouseSensitivity(parseFloat(e.target.value))}
-                  className="w-24 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
-              <button 
-                onClick={() => {
-                  if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
-                    (DeviceOrientationEvent as any).requestPermission()
-                      .then((permissionState: string) => {
-                        if (permissionState === 'granted') {
-                          setIsAirMouseActive(!isAirMouseActive);
-                        }
-                      });
-                  } else {
-                    setIsAirMouseActive(!isAirMouseActive);
-                  }
-                }}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${isAirMouseActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-gray-100 text-gray-500'}`}
-              >
-                <RefreshCw className={`w-3 h-3 ${isAirMouseActive ? 'animate-spin' : ''}`} />
-                Air Mouse {isAirMouseActive ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            <div 
-              className={`flex-1 rounded-3xl border-2 flex items-center justify-center relative overflow-hidden transition-all ${isAirMouseActive ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200 shadow-sm'}`}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
+            처음으로 돌아가기
+          </button>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {activeTab === 'keyboard' ? (
+            <motion.div 
+              key="keyboard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex flex-col overflow-hidden"
             >
-              <div className="text-gray-300 flex flex-col items-center gap-4 pointer-events-none">
-                {isAirMouseActive ? (
-                  <>
-                    <RefreshCw className="w-20 h-20 text-blue-200 animate-pulse" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-400">Tilt to Move</span>
-                  </>
+              {/* Preview */}
+              <div className="flex-1 flex items-center justify-center p-4 bg-white/50">
+                <div className="text-center">
+                  <div className="text-4xl font-light text-gray-800 min-h-[1.2em]">
+                    {(() => {
+                      try {
+                        if (!Hangul) return ' ';
+                        const processed = processCheonjiin(composition);
+                        const assembled = Hangul.assemble(processed);
+                        return assembled || processed.join('') || ' ';
+                      } catch (e) {
+                        return ' ';
+                      }
+                    })()}
+                  </div>
+                  <div className="text-[10px] text-blue-500 font-bold uppercase mt-2">
+                    {inputMode === 'ko' ? '한글' : inputMode === 'en' ? 'English' : inputMode === 'num' ? '숫자' : '기호'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Galaxy Style Keyboard */}
+              <div className="bg-[#D1D3D9] p-1 pb-4 shrink-0">
+                {inputMode === 'sym' ? (
+                  <div className="grid grid-cols-5 gap-1">
+                    {SYMBOL_CONFIG.map(sym => (
+                      <button
+                        key={sym}
+                        onClick={() => handleKeyClick(sym)}
+                        className="h-9 bg-white rounded-md shadow-sm flex items-center justify-center text-sm active:bg-gray-200"
+                      >
+                        {sym}
+                      </button>
+                    ))}
+                    <button 
+                      onClick={() => setInputMode('ko')}
+                      className="col-span-5 h-9 bg-[#B0B3BC] rounded-md shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
+                    >
+                      뒤로가기
+                    </button>
+                  </div>
                 ) : (
-                  <>
-                    <MousePointer2 className="w-20 h-20 opacity-20" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">Trackpad</span>
-                  </>
+                  <div className="grid grid-cols-3 gap-1">
+                    {/* Row 1-3: Main Keys */}
+                    {KEYPAD_CONFIG.slice(0, 9).map(key => (
+                      <button
+                        key={key.id}
+                        onClick={() => handleKeyClick(key.id)}
+                        className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-colors relative overflow-hidden"
+                      >
+                        <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">{key.id}</span>
+                        <span className="text-base font-bold text-gray-800">{key.label}</span>
+                        {inputMode === 'en' && (
+                          <span className="text-[7px] text-gray-400 uppercase font-bold tracking-tighter">
+                            {key.en.join('')}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+
+                    {/* Row 4: Symbols, ㅇㅁ (Center), Backspace */}
+                    <button 
+                      onClick={() => setInputMode('sym')}
+                      className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[10px] font-bold active:bg-gray-400"
+                    >
+                      !#1
+                    </button>
+                    <button 
+                      onClick={() => handleKeyClick('0')}
+                      className="h-11 bg-white rounded-lg shadow-sm flex flex-col items-center justify-center active:bg-gray-200 relative"
+                    >
+                      <span className="absolute top-0.5 right-1 text-[11px] font-black text-gray-600">0</span>
+                      <span className="text-base font-bold text-gray-800">ㅇㅁ</span>
+                    </button>
+                    <button 
+                      onMouseDown={startBackspace}
+                      onMouseUp={stopBackspace}
+                      onMouseLeave={stopBackspace}
+                      onTouchStart={startBackspace}
+                      onTouchEnd={stopBackspace}
+                      className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
+                    >
+                      <Delete className="w-4 h-4" />
+                    </button>
+
+                    {/* Row 5: Mode, Space, Enter */}
+                    <button 
+                      onClick={() => handleKeyClick('mode')}
+                      className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center text-[9px] font-bold active:bg-gray-400"
+                    >
+                      한/영
+                    </button>
+                    <button 
+                      onClick={() => handleKeyClick('space')}
+                      className="h-11 bg-white rounded-lg shadow-sm flex items-center justify-center active:bg-gray-200"
+                    >
+                      <Space className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleKeyClick('enter')}
+                      className="h-11 bg-[#B0B3BC] rounded-lg shadow-sm flex items-center justify-center active:bg-gray-400"
+                    >
+                      <CornerDownLeft className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
               </div>
-              
-              <div className="absolute bottom-6 left-6 right-6 h-28 flex gap-4">
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="mouse"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex-1 flex flex-col p-4 gap-4 overflow-hidden"
+            >
+              {/* Sensitivity & Air Mouse Controls */}
+              <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-gray-200 shadow-sm shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sensitivity</div>
+                  <input 
+                    type="range" 
+                    min="0.5" 
+                    max="5" 
+                    step="0.1" 
+                    value={mouseSensitivity}
+                    onChange={(e) => setMouseSensitivity(parseFloat(e.target.value))}
+                    className="w-24 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  />
+                </div>
                 <button 
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
-                  onClick={() => emitEvent('mouse-click', { button: 'left' })}
+                  onClick={() => {
+                    if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+                      (DeviceOrientationEvent as any).requestPermission()
+                        .then((permissionState: string) => {
+                          if (permissionState === 'granted') {
+                            setIsAirMouseActive(!isAirMouseActive);
+                          }
+                        });
+                    } else {
+                      setIsAirMouseActive(!isAirMouseActive);
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${isAirMouseActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-gray-100 text-gray-500'}`}
                 >
-                  Left Click
-                </button>
-                <button 
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
-                  onClick={() => emitEvent('mouse-click', { button: 'right' })}
-                >
-                  Right Click
+                  <RefreshCw className={`w-3 h-3 ${isAirMouseActive ? 'animate-spin' : ''}`} />
+                  Air Mouse {isAirMouseActive ? 'ON' : 'OFF'}
                 </button>
               </div>
-            </div>
-            
-            <p className="text-[10px] text-center text-gray-400 italic">
-              {isAirMouseActive ? "핸드폰을 기울여서 마우스를 움직이세요" : "트랙패드를 문질러서 마우스를 움직이세요"}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+              <div 
+                className={`flex-1 rounded-3xl border-2 flex items-center justify-center relative overflow-hidden transition-all ${isAirMouseActive ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200 shadow-sm'}`}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+              >
+                <div className="text-gray-300 flex flex-col items-center gap-4 pointer-events-none">
+                  {isAirMouseActive ? (
+                    <>
+                      <RefreshCw className="w-20 h-20 text-blue-200 animate-pulse" />
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-400">Tilt to Move</span>
+                    </>
+                  ) : (
+                    <>
+                      <MousePointer2 className="w-20 h-20 opacity-20" />
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">Trackpad</span>
+                    </>
+                  )}
+                </div>
+                
+                <div className="absolute bottom-6 left-6 right-6 h-28 flex gap-4">
+                  <button 
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
+                    onClick={() => emitEvent('mouse-click', { button: 'left' })}
+                  >
+                    Left Click
+                  </button>
+                  <button 
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
+                    onClick={() => emitEvent('mouse-click', { button: 'right' })}
+                  >
+                    Right Click
+                  </button>
+                </div>
+              </div>
+              
+              <p className="text-[10px] text-center text-gray-400 italic shrink-0">
+                {isAirMouseActive ? "핸드폰을 기울여서 마우스를 움직이세요" : "트랙패드를 문질러서 마우스를 움직이세요"}
+              </p>
+            </motion.div>
+          )}
+        </div>
+      )}
 
       {/* Bottom Bar */}
-      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-3 rounded-full"></div>
+      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-3 rounded-full shrink-0"></div>
     </div>
   );
 }

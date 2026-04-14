@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Info,
   MousePointer2,
-  Type
+  Type,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
@@ -53,7 +54,7 @@ export default function App() {
   const [inputMode, setInputMode] = useState<InputMode>('ko');
   const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
   const [roomId, setRoomId] = useState('');
-  const [text, setText] = useState('');
+  const [committedText, setCommittedText] = useState('');
   const [composition, setComposition] = useState<string[]>([]);
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
@@ -70,6 +71,19 @@ export default function App() {
   const addLog = (msg: string) => {
     setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
   };
+
+  // Handle URL Parameters for Auto-Connect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    const modeParam = params.get('mode');
+
+    if (roomParam && (modeParam === 'sender' || modeParam === 'receiver')) {
+      setRoomId(roomParam);
+      setMode(modeParam as any);
+      addLog(`Auto-connecting to ${roomParam} as ${modeParam}`);
+    }
+  }, []);
 
   // Initialize Firebase Connection Status
   useEffect(() => {
@@ -120,49 +134,45 @@ export default function App() {
   }, [roomId, mode]);
 
   const handleRemoteKeypress = (char: string) => {
-    if (char === ' ') {
-      setText(prev => prev + ' ');
-      setComposition([]); 
-      return;
-    }
-    
     const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(char);
     
     if (isKorean) {
-      setComposition(prev => {
-        const next = [...prev, char];
-        const processed = processCheonjiin(next);
-        const assembled = Hangul.assemble(processed);
-        setText(assembled || processed.join(''));
-        return next;
-      });
+      setComposition(prev => [...prev, char]);
     } else {
-      setText(prev => prev + char);
+      const processed = processCheonjiin(composition);
+      const assembled = Hangul.assemble(processed);
+      setCommittedText(prev => prev + (assembled || processed.join('')) + char);
       setComposition([]); 
     }
   };
 
   const handleRemoteCommand = (cmd: string) => {
     if (cmd === 'backspace') {
-      setComposition(prev => {
-        if (prev.length > 0) {
-          const next = prev.slice(0, -1);
-          const processed = processCheonjiin(next);
-          const assembled = Hangul.assemble(processed);
-          setText(assembled || processed.join(''));
-          return next;
-        } else {
-          setText(prevText => prevText.slice(0, -1));
-          return [];
-        }
-      });
+      if (composition.length > 0) {
+        setComposition(prev => prev.slice(0, -1));
+      } else {
+        setCommittedText(prev => prev.slice(0, -1));
+      }
     } else if (cmd === 'clear') {
       setComposition([]);
-      setText('');
+      setCommittedText('');
     } else if (cmd === 'enter') {
-      setText(prev => prev + '\n');
+      const processed = processCheonjiin(composition);
+      const assembled = Hangul.assemble(processed);
+      setCommittedText(prev => prev + (assembled || processed.join('')) + '\n');
+      setComposition([]);
+    } else if (cmd === 'space') {
+      const processed = processCheonjiin(composition);
+      const assembled = Hangul.assemble(processed);
+      setCommittedText(prev => prev + (assembled || processed.join('')) + ' ');
       setComposition([]);
     }
+  };
+
+  const getDisplayText = () => {
+    const processed = processCheonjiin(composition);
+    const assembled = Hangul.assemble(processed);
+    return committedText + (assembled || processed.join(''));
   };
 
   // Emit Event Helper
@@ -269,7 +279,7 @@ export default function App() {
     }
 
     if (keyId === 'space') {
-      emitEvent('keypress', { char: ' ' });
+      emitEvent('command', { cmd: 'space' });
       setLastChar(null);
       setTapCount(0);
       return;
@@ -361,7 +371,95 @@ export default function App() {
   };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(getDisplayText());
+  };
+
+  const getPythonScript = () => `
+import firebase_admin
+from firebase_admin import credentials, firestore
+import pyautogui
+import time
+import threading
+
+# 1. Download your service account key from Firebase Console
+# 2. Rename it to 'serviceAccountKey.json' and put it in the same folder
+try:
+    cred = credentials.Certificate('serviceAccountKey.json')
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+except Exception as e:
+    print(f"Error initializing Firebase: {e}")
+    print("Please make sure 'serviceAccountKey.json' exists in the same folder.")
+    exit()
+
+room_id = '${roomId}'
+print(f"Monitoring Room: {room_id}")
+
+last_processed_timestamp = time.time() * 1000
+
+def on_snapshot(doc_snapshot, changes, read_time):
+    global last_processed_timestamp
+    for doc in doc_snapshot:
+        data = doc.to_dict()
+        event = data.get('lastEvent')
+        if not event: continue
+        
+        timestamp = event.get('timestamp', 0)
+        if timestamp <= last_processed_timestamp:
+            continue
+            
+        last_processed_timestamp = timestamp
+        
+        etype = event.get('type')
+        edata = event.get('data', {})
+        
+        if etype == 'keypress':
+            char = edata.get('char')
+            print(f"Typing: {char}")
+            if ord(char) > 127: # If it's a non-ASCII character (like Korean)
+                import pyperclip
+                pyperclip.copy(char)
+                if pyautogui._pyautogui_win: # Windows
+                    pyautogui.hotkey('ctrl', 'v')
+                else: # Mac/Linux
+                    pyautogui.hotkey('command', 'v')
+            else:
+                pyautogui.write(char)
+        elif etype == 'command':
+            cmd = edata.get('cmd')
+            print(f"Command: {cmd}")
+            if cmd == 'backspace': pyautogui.press('backspace')
+            elif cmd == 'space': pyautogui.press('space')
+            elif cmd == 'enter': pyautogui.press('enter')
+        elif etype == 'mouse-move':
+            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+            # Increased sensitivity and smoother movement
+            pyautogui.moveRel(dx * 1.5, dy * 1.5, duration=0.05)
+        elif etype == 'mouse-click':
+            btn = edata.get('button', 'left')
+            pyautogui.click(button=btn)
+
+doc_ref = db.collection('rooms').document(room_id)
+doc_watch = doc_ref.on_snapshot(on_snapshot)
+
+print("Connected and waiting for events...")
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    pass
+`.trim();
+
+  const downloadHelper = () => {
+    const blob = new Blob([getPythonScript()], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cheonjiin_helper.py';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   if (mode === 'choice') {
@@ -423,74 +521,7 @@ export default function App() {
 
   if (mode === 'receiver') {
     const shareUrl = `${window.location.origin}?mode=sender&room=${roomId}`;
-    const serverUrl = window.location.origin;
-    const pythonScript = `
-import firebase_admin
-from firebase_admin import credentials, firestore
-import pyautogui
-import time
-import threading
-
-# 1. Download your service account key from Firebase Console
-# 2. Rename it to 'serviceAccountKey.json' and put it in the same folder
-try:
-    cred = credentials.Certificate('serviceAccountKey.json')
-    firebase_admin.initialize_app(cred)
-    db = firestore.client()
-except Exception as e:
-    print(f"Error initializing Firebase: {e}")
-    print("Please make sure 'serviceAccountKey.json' exists in the same folder.")
-    exit()
-
-room_id = '${roomId}'
-print(f"Monitoring Room: {room_id}")
-
-last_processed_timestamp = time.time() * 1000
-
-def on_snapshot(doc_snapshot, changes, read_time):
-    global last_processed_timestamp
-    for doc in doc_snapshot:
-        data = doc.to_dict()
-        event = data.get('lastEvent')
-        if not event: continue
-        
-        timestamp = event.get('timestamp', 0)
-        if timestamp <= last_processed_timestamp:
-            continue
-            
-        last_processed_timestamp = timestamp
-        
-        etype = event.get('type')
-        edata = event.get('data', {})
-        
-        if etype == 'keypress':
-            char = edata.get('char')
-            print(f"Typing: {char}")
-            pyautogui.write(char)
-        elif etype == 'command':
-            cmd = edata.get('cmd')
-            print(f"Command: {cmd}")
-            if cmd == 'backspace': pyautogui.press('backspace')
-            elif cmd == 'space': pyautogui.press('space')
-            elif cmd == 'enter': pyautogui.press('enter')
-        elif etype == 'mouse-move':
-            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            # Increased sensitivity and smoother movement
-            pyautogui.moveRel(dx * 1.5, dy * 1.5, duration=0.05)
-        elif etype == 'mouse-click':
-            btn = edata.get('button', 'left')
-            pyautogui.click(button=btn)
-
-doc_ref = db.collection('rooms').document(room_id)
-doc_watch = doc_ref.on_snapshot(on_snapshot)
-
-print("Connected and waiting for events...")
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    pass
-`.trim();
+    const pythonScript = getPythonScript();
 
     return (
       <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
@@ -530,7 +561,7 @@ except KeyboardInterrupt:
                 </div>
               </div>
               <textarea 
-                value={text}
+                value={getDisplayText()}
                 readOnly
                 placeholder="핸드폰에서 타이핑을 시작하세요..."
                 className="w-full h-[300px] p-6 text-2xl font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none leading-relaxed"
@@ -546,15 +577,23 @@ except KeyboardInterrupt:
               
               <div className="grid md:grid-cols-2 gap-8">
                 <div className="space-y-4 text-sm text-gray-400 font-serif italic">
-                  <p>브라우저 밖(메모장, 카톡 등)에 직접 입력하려면 아래 파이썬 스크립트를 PC에서 실행하세요.</p>
+                  <p>브라우저 밖(메모장, 카톡 등)에 직접 입력하려면 아래 파일을 다운로드하여 실행하세요.</p>
                   <ol className="list-decimal list-inside space-y-2">
+                    <li>
+                      <button 
+                        onClick={downloadHelper}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors inline-flex items-center gap-2 not-italic"
+                      >
+                        <Download className="w-4 h-4" />
+                        도우미 파일 다운로드 (.py)
+                      </button>
+                    </li>
                     <li>Python 설치 후 터미널에서 실행:<br/>
                       <code className="bg-white/10 text-blue-300 px-2 py-1 rounded mt-1 inline-block not-italic font-mono text-[10px]">
-                        pip install pyautogui firebase-admin
+                        pip install pyautogui firebase-admin pyperclip
                       </code>
                     </li>
-                    <li>Firebase 콘솔에서 <b>서비스 계정 키(JSON)</b>를 다운로드하여 <code className="text-white">serviceAccountKey.json</code>으로 저장합니다.</li>
-                    <li>오른쪽 코드를 <code className="text-white">helper.py</code>로 저장하고 같은 폴더에서 실행합니다.</li>
+                    <li>다운로드한 파일을 실행하면 핸드폰 자판이 컴퓨터 전체에서 작동합니다!</li>
                   </ol>
                 </div>
                 
@@ -682,7 +721,11 @@ except KeyboardInterrupt:
             <div className="flex-1 flex items-center justify-center p-4 bg-white/50">
               <div className="text-center">
                 <div className="text-4xl font-light text-gray-800 min-h-[1.2em]">
-                  {lastChar ? (inputMode === 'sym' ? lastChar : KEYPAD_CONFIG.find(k => k.id === lastChar)?.[inputMode === 'sym' ? 'num' : inputMode][tapCount]) : ' '}
+                  {(() => {
+                    const processed = processCheonjiin(composition);
+                    const assembled = Hangul.assemble(processed);
+                    return assembled || processed.join('') || ' ';
+                  })()}
                 </div>
                 <div className="text-[10px] text-blue-500 font-bold uppercase mt-2">
                   {inputMode === 'ko' ? '한글' : inputMode === 'en' ? 'English' : inputMode === 'num' ? '숫자' : '기호'}

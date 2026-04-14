@@ -7,10 +7,10 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      // For this specific app, we allow public read/write to rooms by ID
-      // since it's a simple remote control app. In a production app,
-      // we would add more strict ownership checks.
       allow read, write: if true;
+      match /{allPaths=**} {
+        allow read, write: if true;
+      }
     }
   }
 }

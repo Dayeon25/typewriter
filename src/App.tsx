@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Keyboard as KeyboardIcon, 
@@ -23,7 +23,13 @@ import {
   onSnapshot, 
   updateDoc, 
   serverTimestamp,
-  getDoc
+  getDoc,
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  limit,
+  where
 } from 'firebase/firestore';
 
 // --- Keypad Configuration ---
@@ -35,9 +41,26 @@ const KEYPAD_CONFIG = [
   { id: '5', label: 'ㄴㄹ', ko: ['ㄴ', 'ㄹ'], en: ['m', 'n', 'o'], num: ['5'] },
   { id: '6', label: 'ㄷㅌ', ko: ['ㄷ', 'ㅌ', 'ㄸ'], en: ['p', 'q', 'r', 's'], num: ['6'] },
   { id: '7', label: 'ㅂㅍ', ko: ['ㅂ', 'ㅍ', 'ㅃ'], en: ['t', 'u', 'v'], num: ['7'] },
-  { id: '8', label: 'ㅅㅎ', ko: ['ㅅ', 'ㅎ'], en: ['w', 'x', 'y', 'z'], num: ['8'] },
+  { id: '8', label: 'ㅅㅎ', ko: ['ㅅ', 'ㅎ', 'ㅆ'], en: ['w', 'x', 'y', 'z'], num: ['8'] },
   { id: '9', label: 'ㅈㅊ', ko: ['ㅈ', 'ㅊ', 'ㅉ'], en: ['.', ',', '!', '?'], num: ['9'] },
   { id: '0', label: 'ㅇㅁ', ko: ['ㅇ', 'ㅁ'], en: [' '], num: ['0'] },
+  { id: 'punct', label: '.,?!', ko: ['.', ',', '?', '!'], en: ['.', ',', '?', '!'], num: ['.', ',', '?', '!'] },
+];
+
+const SYMBOL_LAYOUT_1 = [
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+  ['+', '×', '÷', '=', '/', '_', '<', '>', '[', ']'],
+  ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+  ['1/2', '-', '\'', '"', ':', ';', ',', '?', 'backspace'],
+  ['ABC', 'mode', ',', 'space', '.', 'enter']
+];
+
+const SYMBOL_LAYOUT_2 = [
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+  ['`', '~', '\\', '|', '{', '}', '€', '£', '¥', '₩'],
+  ['°', '•', '○', '●', '□', '■', '♤', '♡', '♢', '♧'],
+  ['2/2', '☆', '▪︎', '¤', '《', '》', '¡', '¿', 'backspace'],
+  ['ABC', 'mode', ',', 'space', '.', 'enter']
 ];
 
 const SYMBOL_CONFIG = [
@@ -62,6 +85,7 @@ export default function App() {
     return 'choice';
   });
   const [inputMode, setInputMode] = useState<InputMode>('ko');
+  const [symbolPage, setSymbolPage] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
   const [isAirMouseActive, setIsAirMouseActive] = useState(false);
   const [mouseSensitivity, setMouseSensitivity] = useState(1.5);
@@ -75,8 +99,11 @@ export default function App() {
       return '';
     }
   });
-  const [committedText, setCommittedText] = useState('');
-  const [composition, setComposition] = useState<string[]>([]);
+  const [inputState, setInputState] = useState({
+    committedText: '',
+    composition: [] as string[]
+  });
+
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
@@ -86,6 +113,7 @@ export default function App() {
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [hasError, setHasError] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string>('');
+  const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
   
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -123,87 +151,61 @@ export default function App() {
     addLog(`Connecting to room: ${roomId}`);
     
     const roomRef = doc(db, 'rooms', roomId);
+    const eventsRef = collection(roomRef, 'events');
     
     let lastProcessedTimestamp = Date.now();
 
-    // Listen for events (Receiver logic)
-    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
-      if (!snapshot.exists()) {
+    // Listen for room status
+    const unsubRoom = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setIsConnected(true);
+        setConnectionError(null);
+      } else {
         setIsConnected(false);
-        return;
       }
+    });
+
+    // Listen for events (Receiver logic)
+    const q = query(eventsRef, where('timestamp', '>', lastProcessedTimestamp), orderBy('timestamp', 'asc'));
+    const unsubEvents = onSnapshot(q, (snapshot) => {
+      if (mode !== 'receiver') return;
       
-      setIsConnected(true);
-      setConnectionError(null);
-      
-      const data = snapshot.data();
-      const event = data.lastEvent;
-      
-      if (event && mode === 'receiver') {
-        // Only process new events
-        if (event.timestamp && event.timestamp > lastProcessedTimestamp) {
-          lastProcessedTimestamp = event.timestamp;
-          
-          // Handle events based on type
-          if (event.type === 'keypress') {
-            handleRemoteKeypress(event.data.char);
-          } else if (event.type === 'command') {
-            handleRemoteCommand(event.data.cmd);
-          } else if (event.type === 'mouse-move') {
-            console.log('Mouse move:', event.data.dx, event.data.dy);
-          } else if (event.type === 'mouse-click') {
-            console.log('Mouse click:', event.data.button);
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const event = change.doc.data();
+          if (event.timestamp > lastProcessedTimestamp) {
+            lastProcessedTimestamp = event.timestamp;
+            if (event.type === 'keypress') {
+              handleInputRef.current(event.data.char);
+            } else if (event.type === 'command') {
+              handleInputRef.current(event.data.cmd, true);
+            }
           }
         }
-      }
+      });
     }, (err) => {
       setConnectionError(err.message);
       addLog(`Firebase error: ${err.message}`);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubRoom();
+      unsubEvents();
+    };
   }, [roomId, mode]);
 
   const handleRemoteKeypress = (char: string) => {
-    const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(char);
-    
-    if (isKorean) {
-      setComposition(prev => [...prev, char]);
-    } else {
-      const processed = processCheonjiin(composition);
-      const assembled = Hangul.assemble(processed);
-      setCommittedText(prev => prev + (assembled || processed.join('')) + char);
-      setComposition([]); 
-    }
+    handleInput(char);
   };
 
   const handleRemoteCommand = (cmd: string) => {
-    if (cmd === 'backspace') {
-      if (composition.length > 0) {
-        setComposition(prev => prev.slice(0, -1));
-      } else {
-        setCommittedText(prev => prev.slice(0, -1));
-      }
-    } else if (cmd === 'clear') {
-      setComposition([]);
-      setCommittedText('');
-    } else if (cmd === 'enter') {
-      const processed = processCheonjiin(composition);
-      const assembled = Hangul.assemble(processed);
-      setCommittedText(prev => prev + (assembled || processed.join('')) + '\n');
-      setComposition([]);
-    } else if (cmd === 'space') {
-      const processed = processCheonjiin(composition);
-      const assembled = Hangul.assemble(processed);
-      setCommittedText(prev => prev + (assembled || processed.join('')) + ' ');
-      setComposition([]);
-    }
+    handleInput(cmd, true);
   };
 
   const getDisplayText = () => {
-    const processed = processCheonjiin(composition);
+    const processed = processCheonjiin(inputState.composition);
     const assembled = Hangul.assemble(processed);
-    return committedText + (assembled || processed.join(''));
+    return inputState.committedText + (assembled || processed.join(''));
   };
 
   // Emit Event Helper
@@ -211,15 +213,20 @@ export default function App() {
     if (!roomId) return;
     try {
       const roomRef = doc(db, 'rooms', roomId);
-      await setDoc(roomRef, {
-        id: roomId,
-        lastEvent: {
-          type,
-          data,
-          timestamp: Date.now() // Using client timestamp for immediate ordering
-        },
-        updatedAt: serverTimestamp()
+      const eventsRef = collection(roomRef, 'events');
+      
+      // Update room heartbeat
+      setDoc(roomRef, { 
+        id: roomId, 
+        updatedAt: serverTimestamp() 
       }, { merge: true });
+
+      // Add event to subcollection
+      await addDoc(eventsRef, {
+        type,
+        data,
+        timestamp: Date.now()
+      });
     } catch (err) {
       console.error('Emit error:', err);
     }
@@ -283,6 +290,55 @@ export default function App() {
     return seq.split('');
   };
 
+  const handleInput = (input: string, isCommand: boolean = false) => {
+    setInputState(prev => {
+      let { committedText, composition } = prev;
+
+      if (isCommand) {
+        if (input === 'backspace') {
+          if (composition.length > 0) {
+            return { ...prev, composition: composition.slice(0, -1) };
+          } else {
+            return { ...prev, committedText: committedText.slice(0, -1) };
+          }
+        } else if (input === 'clear') {
+          return { committedText: '', composition: [] };
+        } else if (input === 'enter') {
+          const processed = processCheonjiin(composition);
+          const assembled = Hangul.assemble(processed);
+          return {
+            committedText: committedText + (assembled || processed.join('')) + '\n',
+            composition: []
+          };
+        } else if (input === 'space') {
+          const processed = processCheonjiin(composition);
+          const assembled = Hangul.assemble(processed);
+          return {
+            committedText: committedText + (assembled || processed.join('')) + ' ',
+            composition: []
+          };
+        }
+        return prev;
+      }
+
+      // Handle character input
+      const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(input);
+      if (isKorean) {
+        return { ...prev, composition: [...composition, input] };
+      } else {
+        const processed = processCheonjiin(composition);
+        const assembled = Hangul.assemble(processed);
+        return {
+          committedText: committedText + (assembled || processed.join('')) + input,
+          composition: []
+        };
+      }
+    });
+  };
+
+  const handleInputRef = useRef(handleInput);
+  handleInputRef.current = handleInput;
+
   const handleKeyClick = (keyId: string) => {
     if (!roomId) return;
 
@@ -292,17 +348,22 @@ export default function App() {
       setInputMode(nextMode);
       setLastChar(null);
       setTapCount(0);
+      setShiftState(0);
+      return;
+    }
+
+    if (keyId === 'shift') {
+      setShiftState(prev => {
+        if (prev === 0) return 1;
+        if (prev === 1) return 2;
+        return 0;
+      });
       return;
     }
 
     if (keyId === 'backspace') {
       emitEvent('command', { cmd: 'backspace' });
-      // Also update local state for preview
-      if (composition.length > 0) {
-        setComposition(prev => prev.slice(0, -1));
-      } else {
-        setCommittedText(prev => prev.slice(0, -1));
-      }
+      handleInput('backspace', true);
       setLastChar(null);
       setTapCount(0);
       return;
@@ -310,10 +371,7 @@ export default function App() {
 
     if (keyId === 'enter') {
       emitEvent('command', { cmd: 'enter' });
-      const processed = processCheonjiin(composition);
-      const assembled = Hangul.assemble(processed);
-      setCommittedText(prev => prev + (assembled || processed.join('')) + '\n');
-      setComposition([]);
+      handleInput('enter', true);
       setLastChar(null);
       setTapCount(0);
       return;
@@ -321,17 +379,7 @@ export default function App() {
 
     if (keyId === 'space') {
       emitEvent('command', { cmd: 'space' });
-      const processed = processCheonjiin(composition);
-      const assembled = Hangul.assemble(processed);
-      setCommittedText(prev => prev + (assembled || processed.join('')) + ' ');
-      setComposition([]);
-      setLastChar(null);
-      setTapCount(0);
-      return;
-    }
-
-    if (keyId === 'punct') {
-      emitEvent('keypress', { char: '.' });
+      handleInput('space', true);
       setLastChar(null);
       setTapCount(0);
       return;
@@ -339,6 +387,20 @@ export default function App() {
 
     if (inputMode === 'sym') {
       emitEvent('keypress', { char: keyId });
+      handleInput(keyId);
+      return;
+    }
+
+    if (inputMode === 'en' && keyId.length === 1) {
+      let char = keyId;
+      if (shiftState > 0) {
+        char = char.toUpperCase();
+      } else {
+        char = char.toLowerCase();
+      }
+      emitEvent('keypress', { char });
+      handleInput(char);
+      if (shiftState === 1) setShiftState(0); 
       return;
     }
 
@@ -351,9 +413,12 @@ export default function App() {
     if (lastChar === keyId && !isVowel && inputMode !== 'num') {
       // Multi-tap
       emitEvent('command', { cmd: 'backspace' });
+      handleInput('backspace', true);
+      
       const nextTap = (tapCount + 1) % chars.length;
       setTapCount(nextTap);
       emitEvent('keypress', { char: chars[nextTap] });
+      handleInput(chars[nextTap]);
       
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = setTimeout(() => {
@@ -366,6 +431,7 @@ export default function App() {
       setLastChar(keyId);
       setTapCount(0);
       emitEvent('keypress', { char: chars[0] });
+      handleInput(chars[0]);
       
       if (!isVowel && inputMode !== 'num') {
         tapTimer.current = setTimeout(() => {
@@ -377,13 +443,19 @@ export default function App() {
     }
   };
 
-  const startBackspace = () => {
+  const startBackspace = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      if ('touches' in e) {
+        // Prevent mouse events from firing after touch
+        if (e.cancelable) e.preventDefault();
+      }
+    }
     if (backspaceInterval.current) return;
     handleKeyClick('backspace');
-    // Faster repeat for better feel
+    // Slightly slower repeat for better control and reliability
     backspaceInterval.current = setInterval(() => {
       handleKeyClick('backspace');
-    }, 100);
+    }, 150);
   };
 
   const stopBackspace = () => {
@@ -447,50 +519,49 @@ print(f"Monitoring Room: {room_id}")
 
 last_processed_timestamp = time.time() * 1000
 
-def on_snapshot(doc_snapshot, changes, read_time):
+def on_snapshot(col_snapshot, changes, read_time):
     global last_processed_timestamp
-    for doc in doc_snapshot:
-        data = doc.to_dict()
-        event = data.get('lastEvent')
-        if not event: continue
-        
-        timestamp = event.get('timestamp', 0)
-        if timestamp <= last_processed_timestamp:
-            continue
+    for change in changes:
+        if change.type.name == 'ADDED':
+            data = change.document.to_dict()
+            timestamp = data.get('timestamp', 0)
+            if timestamp <= last_processed_timestamp:
+                continue
+            last_processed_timestamp = timestamp
             
-        last_processed_timestamp = timestamp
-        
-        etype = event.get('type')
-        edata = event.get('data', {})
-        
-        if etype == 'keypress':
-            char = edata.get('char')
-            print(f"Typing: {char}")
-            if ord(char) > 127: # If it's a non-ASCII character (like Korean)
-                import pyperclip
-                pyperclip.copy(char)
-                if pyautogui._pyautogui_win: # Windows
-                    pyautogui.hotkey('ctrl', 'v')
-                else: # Mac/Linux
-                    pyautogui.hotkey('command', 'v')
-            else:
-                pyautogui.write(char)
-        elif etype == 'command':
-            cmd = edata.get('cmd')
-            print(f"Command: {cmd}")
-            if cmd == 'backspace': pyautogui.press('backspace')
-            elif cmd == 'space': pyautogui.press('space')
-            elif cmd == 'enter': pyautogui.press('enter')
-        elif etype == 'mouse-move':
-            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            # Instant movement for better responsiveness
-            pyautogui.moveRel(dx, dy)
-        elif etype == 'mouse-click':
-            btn = edata.get('button', 'left')
-            pyautogui.click(button=btn)
+            etype = data.get('type')
+            edata = data.get('data', {})
+            
+            if etype == 'keypress':
+                char = edata.get('char')
+                print(f"Typing: {char}")
+                if ord(char) > 127: # If it's a non-ASCII character (like Korean)
+                    import pyperclip
+                    pyperclip.copy(char)
+                    if pyautogui._pyautogui_win: # Windows
+                        pyautogui.hotkey('ctrl', 'v')
+                    else: # Mac/Linux
+                        pyautogui.hotkey('command', 'v')
+                else:
+                    pyautogui.write(char)
+            elif etype == 'command':
+                cmd = edata.get('cmd')
+                print(f"Command: {cmd}")
+                if cmd == 'backspace': pyautogui.press('backspace')
+                elif cmd == 'space': pyautogui.press('space')
+                elif cmd == 'enter': pyautogui.press('enter')
+            elif etype == 'mouse-move':
+                dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+                pyautogui.moveRel(dx, dy)
+            elif etype == 'mouse-click':
+                btn = edata.get('button', 'left')
+                pyautogui.click(button=btn)
 
 doc_ref = db.collection('rooms').document(room_id)
-doc_watch = doc_ref.on_snapshot(on_snapshot)
+events_ref = doc_ref.collection('events')
+# Initial query to only get NEW events
+query = events_ref.where('timestamp', '>', last_processed_timestamp).order_by('timestamp')
+doc_watch = query.on_snapshot(on_snapshot)
 
 print("Connected and waiting for events...")
 try:
@@ -850,115 +921,245 @@ except KeyboardInterrupt:
                 </div>
               </div>
 
-            {/* Galaxy Style Keyboard - 4 Column Layout */}
-            <div className="bg-[#D1D3D9] p-1.5 pb-6 shrink-0">
+            {/* Galaxy Style Keyboard - Dark Theme */}
+            <div className="bg-black p-1 pb-6 shrink-0">
               {inputMode === 'sym' ? (
-                <div className="grid grid-cols-5 gap-1.5">
-                  {SYMBOL_CONFIG.map(sym => (
-                    <button
-                      key={sym}
-                      onClick={() => handleKeyClick(sym)}
-                      className="h-12 bg-white rounded-md shadow-sm flex items-center justify-center text-lg active:bg-gray-200"
-                    >
-                      {sym}
-                    </button>
+                <div className="flex flex-col gap-1">
+                  {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
+                    <div key={rowIndex} className="flex gap-1">
+                      {row.map((key, keyIndex) => {
+                        if (key === 'backspace') {
+                          return (
+                            <button 
+                              key={key}
+                              onMouseDown={(e) => startBackspace(e)}
+                              onMouseUp={stopBackspace}
+                              onMouseLeave={stopBackspace}
+                              onTouchStart={(e) => startBackspace(e)}
+                              onTouchEnd={stopBackspace}
+                              className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center active:bg-[#4A4A4C]"
+                            >
+                              <Delete className="w-5 h-5 text-white" />
+                            </button>
+                          );
+                        }
+                        if (key === 'ABC') {
+                          return (
+                            <button key={key} onClick={() => setInputMode('en')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">ABC</button>
+                          );
+                        }
+                        if (key === 'mode') {
+                          return (
+                            <button key={key} onClick={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex flex-col items-center justify-center text-white text-[8px] font-bold leading-tight">
+                              <span>한</span>
+                              <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
+                              <span className="ml-1.5">영</span>
+                            </button>
+                          );
+                        }
+                        if (key === 'space') {
+                          return (
+                            <button key={key} onClick={() => handleKeyClick('space')} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center">
+                              <div className="w-16 h-1 bg-white/20 rounded-full"></div>
+                            </button>
+                          );
+                        }
+                        if (key === 'enter') {
+                          return (
+                            <button key={key} onClick={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center">
+                              <CornerDownLeft className="w-5 h-5 text-white" />
+                            </button>
+                          );
+                        }
+                        if (key === '1/2') {
+                          return (
+                            <button key={key} onClick={() => setSymbolPage(2)} className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">1/2</button>
+                          );
+                        }
+                        if (key === '2/2') {
+                          return (
+                            <button key={key} onClick={() => setSymbolPage(1)} className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">2/2</button>
+                          );
+                        }
+                        return (
+                          <button
+                            key={keyIndex}
+                            onClick={() => handleKeyClick(key)}
+                            className={`flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]`}
+                          >
+                            {key}
+                          </button>
+                        );
+                      })}
+                    </div>
                   ))}
-                  <button 
-                    onClick={() => setInputMode('ko')}
-                    className="col-span-5 h-12 bg-[#B0B3BC] rounded-md shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400"
-                  >
-                    뒤로가기
-                  </button>
+                </div>
+              ) : inputMode === 'en' ? (
+                <div className="flex flex-col gap-1.5">
+                  {/* Row 1: Numbers */}
+                  <div className="flex gap-1">
+                    {['1','2','3','4','5','6','7','8','9','0'].map(k => (
+                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]">{k}</button>
+                    ))}
+                  </div>
+                  {/* Row 2: QWERTY */}
+                  <div className="flex gap-1">
+                    {['q','w','e','r','t','y','u','i','o','p'].map(k => (
+                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                    ))}
+                  </div>
+                  {/* Row 3: ASDF */}
+                  <div className="flex gap-1 px-[5%]">
+                    {['a','s','d','f','g','h','j','k','l'].map(k => (
+                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                    ))}
+                  </div>
+                  {/* Row 4: Shift, ZXCV, Backspace */}
+                  <div className="flex gap-1">
+                    <button onClick={() => handleKeyClick('shift')} className={`w-[13%] h-10 rounded-md flex items-center justify-center transition-colors ${shiftState === 2 ? 'bg-white text-blue-600' : shiftState === 1 ? 'bg-white text-black' : 'bg-[#3A3A3C] text-white'}`}>
+                      <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                        <path d="M12 4l-8 8h5v8h6v-8h5z"/>
+                        {shiftState === 2 && <rect x="4" y="2" width="16" height="2" />}
+                      </svg>
+                    </button>
+                    <div className="flex-1 flex gap-1">
+                      {['z','x','c','v','b','n','m'].map(k => (
+                        <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                      ))}
+                    </div>
+                    <button 
+                      onMouseDown={(e) => startBackspace(e)}
+                      onMouseUp={stopBackspace}
+                      onMouseLeave={stopBackspace}
+                      onTouchStart={(e) => startBackspace(e)}
+                      onTouchEnd={stopBackspace}
+                      className="w-[13%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center active:bg-[#4A4A4C]"
+                    >
+                      <Delete className="w-5 h-5 text-white" />
+                    </button>
+                  </div>
+                  {/* Row 5: Bottom Bar */}
+                  <div className="flex gap-1">
+                    <button onClick={() => setInputMode('sym')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">!#1</button>
+                    <button onClick={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex flex-col items-center justify-center text-white text-[8px] font-bold leading-tight">
+                      <span>한</span>
+                      <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
+                      <span className="ml-1.5">영</span>
+                    </button>
+                    <button onClick={() => handleKeyClick(',')} className="w-[10%] h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-lg font-bold">,</button>
+                    <button onClick={() => handleKeyClick('space')} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center">
+                      <div className="w-16 h-1 bg-white/20 rounded-full"></div>
+                    </button>
+                    <button onClick={() => handleKeyClick('.')} className="w-[10%] h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-lg font-bold">.</button>
+                    <button onClick={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center">
+                      <CornerDownLeft className="w-5 h-5 text-white" />
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="flex flex-col gap-1.5">
                   {/* Row 1 */}
-                  {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
-                    <button
-                      key={key.id}
-                      onClick={() => handleKeyClick(key.id)}
-                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
+                      <button
+                        key={key.id}
+                        onClick={() => handleKeyClick(key.id)}
+                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                      >
+                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
+                        <span className="text-xl font-bold text-white">{key.label}</span>
+                      </button>
+                    ))}
+                    <button 
+                      onMouseDown={(e) => startBackspace(e)}
+                      onMouseUp={stopBackspace}
+                      onMouseLeave={stopBackspace}
+                      onTouchStart={(e) => startBackspace(e)}
+                      onTouchEnd={stopBackspace}
+                      className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
                     >
-                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
-                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
+                      <Delete className="w-6 h-6 text-white" />
                     </button>
-                  ))}
-                  <button 
-                    onMouseDown={startBackspace}
-                    onMouseUp={stopBackspace}
-                    onMouseLeave={stopBackspace}
-                    onTouchStart={startBackspace}
-                    onTouchEnd={stopBackspace}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
-                  >
-                    <Delete className="w-6 h-6 text-gray-700" />
-                  </button>
+                  </div>
 
                   {/* Row 2 */}
-                  {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
-                    <button
-                      key={key.id}
-                      onClick={() => handleKeyClick(key.id)}
-                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
+                      <button
+                        key={key.id}
+                        onClick={() => handleKeyClick(key.id)}
+                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                      >
+                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
+                        <span className="text-xl font-bold text-white">{key.label}</span>
+                      </button>
+                    ))}
+                    <button 
+                      onClick={() => handleKeyClick('enter')}
+                      className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
                     >
-                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
-                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
+                      <CornerDownLeft className="w-6 h-6 text-white" />
                     </button>
-                  ))}
-                  <button 
-                    onClick={() => handleKeyClick('enter')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
-                  >
-                    <CornerDownLeft className="w-6 h-6 text-gray-700" />
-                  </button>
+                  </div>
 
                   {/* Row 3 */}
-                  {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
-                    <button
-                      key={key.id}
-                      onClick={() => handleKeyClick(key.id)}
-                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
+                      <button
+                        key={key.id}
+                        onClick={() => handleKeyClick(key.id)}
+                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                      >
+                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
+                        <span className="text-xl font-bold text-white">{key.label}</span>
+                      </button>
+                    ))}
+                    <button 
+                      onClick={() => handleKeyClick('punct')}
+                      className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all text-xl font-bold text-white"
                     >
-                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
-                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
+                      .,?!
                     </button>
-                  ))}
-                  <button 
-                    onClick={() => handleKeyClick('space')}
-                    className="h-16 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200 active:scale-95 transition-all"
-                  >
-                    <Space className="w-6 h-6 text-gray-700" />
-                  </button>
+                  </div>
 
                   {/* Row 4 */}
-                  <button 
-                    onClick={() => setInputMode('sym')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400 active:scale-95 transition-all"
-                  >
-                    !#1
-                  </button>
-                  <button 
-                    onClick={() => handleKeyClick('0')}
-                    className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 active:scale-95 transition-all relative"
-                  >
-                    <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">0</span>
-                    <span className="text-xl font-bold text-gray-800">ㅇㅁ</span>
-                  </button>
-                  <button 
-                    onClick={() => handleKeyClick('mode')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400 active:scale-95 transition-all"
-                  >
-                    한/영
-                  </button>
-                  <button 
-                    onClick={() => sendCommand('clear')}
-                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
-                  >
-                    <RefreshCw className="w-5 h-5 text-gray-700" />
-                  </button>
+                  <div className="grid grid-cols-4 gap-1.5 h-16">
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={() => setInputMode('sym')}
+                        className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
+                      >
+                        !#1
+                      </button>
+                      <button 
+                        onClick={() => handleKeyClick('mode')}
+                        className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95 leading-tight"
+                      >
+                        <span>한</span>
+                        <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
+                        <span className="ml-1">영</span>
+                      </button>
+                    </div>
+                    <button 
+                      onClick={() => handleKeyClick('0')}
+                      className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                    >
+                      <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>
+                      <span className="text-xl font-bold text-white">ㅇㅁ</span>
+                    </button>
+                    <button 
+                      onClick={() => handleKeyClick('space')}
+                      className="bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all"
+                    >
+                      <div className="w-10 h-1 bg-white/20 rounded-full"></div>
+                    </button>
+                    <button 
+                      onClick={() => sendCommand('clear')}
+                      className="bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
+                    >
+                      한자
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

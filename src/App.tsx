@@ -103,6 +103,17 @@ export default function App() {
     committedText: '',
     composition: [] as string[]
   });
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    mousePosRef.current = mousePos;
+  }, [mousePos]);
+  const eventSeq = useRef(0);
+
+  const [isCompact, setIsCompact] = useState(false);
+  const [autoCopy, setAutoCopy] = useState(false);
+  const [lastCopiedText, setLastCopiedText] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
@@ -155,18 +166,23 @@ export default function App() {
     
     let lastProcessedTimestamp = Date.now();
 
-    // Listen for room status
+    // Listen for room status and state sync
     const unsubRoom = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
+        const data = snapshot.data();
         setIsConnected(true);
         setConnectionError(null);
+        // Sync input state from Sender to Receiver
+        if (mode === 'receiver' && data.inputState) {
+          setInputState(data.inputState);
+        }
       } else {
         setIsConnected(false);
       }
     });
 
-    // Listen for events (Receiver logic)
-    const q = query(eventsRef, where('timestamp', '>', lastProcessedTimestamp), orderBy('timestamp', 'asc'));
+    // Listen for events (Receiver logic - Mouse/Clicks only)
+    const q = query(eventsRef, where('timestamp', '>', lastProcessedTimestamp), orderBy('timestamp', 'asc'), orderBy('seq', 'asc'));
     const unsubEvents = onSnapshot(q, (snapshot) => {
       if (mode !== 'receiver') return;
       
@@ -175,10 +191,19 @@ export default function App() {
           const event = change.doc.data();
           if (event.timestamp > lastProcessedTimestamp) {
             lastProcessedTimestamp = event.timestamp;
-            if (event.type === 'keypress') {
-              handleInputRef.current(event.data.char);
-            } else if (event.type === 'command') {
-              handleInputRef.current(event.data.cmd, true);
+            if (event.type === 'mousemove' || event.type === 'mouse-move') {
+              const dx = event.data.dx || 0;
+              const dy = event.data.dy || 0;
+              setMousePos(prev => {
+                const newPos = {
+                  x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+                  y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+                };
+                return newPos;
+              });
+            } else if (event.type === 'click' || event.type === 'mouse-click') {
+              const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+              if (el instanceof HTMLElement) el.click();
             }
           }
         }
@@ -194,9 +219,20 @@ export default function App() {
     };
   }, [roomId, mode]);
 
-  const handleRemoteKeypress = (char: string) => {
-    handleInput(char);
-  };
+  useEffect(() => {
+    if (autoCopy && mode === 'receiver') {
+      const text = getDisplayText();
+      if (text && text !== lastCopiedText) {
+        navigator.clipboard.writeText(text).then(() => {
+          setLastCopiedText(text);
+          setCopyFeedback(true);
+          setTimeout(() => setCopyFeedback(false), 1000);
+        }).catch(() => {
+          // Silent fail for auto-copy if tab is inactive
+        });
+      }
+    }
+  }, [inputState.committedText, autoCopy, mode]);
 
   const handleRemoteCommand = (cmd: string) => {
     handleInput(cmd, true);
@@ -204,13 +240,22 @@ export default function App() {
 
   const getDisplayText = () => {
     const processed = processCheonjiin(inputState.composition);
-    const assembled = Hangul.assemble(processed);
-    return inputState.committedText + (assembled || processed.join(''));
+    // Special case: if composition is just one dot, don't let Hangul.assemble turn it into 'ㅏ'
+    const assembled = (processed.length === 1 && processed[0] === 'ㆍ') ? 'ㆍ' : Hangul.assemble(processed);
+    const fullText = inputState.committedText + (assembled || processed.join(''));
+    
+    if (mode === 'sender') {
+      // Only show text after the last newline for a cleaner mobile experience
+      const lines = fullText.split('\n');
+      return lines[lines.length - 1];
+    }
+    return fullText;
   };
 
   // Emit Event Helper
   const emitEvent = async (type: string, data: any) => {
     if (!roomId) return;
+    addLog(`Emitting ${type}`);
     try {
       const roomRef = doc(db, 'rooms', roomId);
       const eventsRef = collection(roomRef, 'events');
@@ -225,7 +270,8 @@ export default function App() {
       await addDoc(eventsRef, {
         type,
         data,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        seq: eventSeq.current++
       });
     } catch (err) {
       console.error('Emit error:', err);
@@ -266,12 +312,16 @@ export default function App() {
       'ㅣㆍ': 'ㅏ', 'ㅣㆍㆍ': 'ㅑ', 'ㆍㅣ': 'ㅓ', 'ㆍㆍㅣ': 'ㅕ',
       'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
       'ㅡㅣ': 'ㅢ', 'ㅣㆍㅣ': 'ㅐ', 'ㅣㆍㆍㅣ': 'ㅒ', 'ㆍㅣㅣ': 'ㅔ',
-      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ', 'ㅣㆍㅡㅣ': 'ㅘ',
-      'ㅣㆍㅡㅣㅣ': 'ㅙ', 'ㆍㅡㅣㆍㅣ': 'ㅝ', 'ㆍㅡㅣㆍㅣㅣ': 'ㅞ',
-      'ㅣ': 'ㅣ', 'ㆍ': 'ㅏ', 'ㅡ': 'ㅡ'
+      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ',
+      'ㆍㅡㅣㆍ': 'ㅘ',
+      'ㆍㅡㅣㆍㅣ': 'ㅙ',
+      'ㅡㆍㆍㅣ': 'ㅝ',
+      'ㅡㆍㆍㅣㅣ': 'ㅞ',
+      'ㅡㆍㅣㆍㅣ': 'ㅙ', // User specific request
+      'ㅣ': 'ㅣ', 'ㆍ': 'ㆍ', 'ㅡ': 'ㅡ'
     };
     // Special case for single building blocks to ensure they show up
-    if (seq === 'ㆍ') return 'ㅏ'; 
+    if (seq === 'ㆍ') return 'ㆍ'; 
     if (seq === 'ㅣ') return 'ㅣ';
     if (seq === 'ㅡ') return 'ㅡ';
     
@@ -339,8 +389,38 @@ export default function App() {
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
 
+  // Sync state to Firestore (Sender -> Receiver)
+  useEffect(() => {
+    if (mode === 'sender' && roomId && isConnected) {
+      const roomRef = doc(db, 'rooms', roomId);
+      updateDoc(roomRef, {
+        inputState: inputState,
+        lastUpdate: serverTimestamp()
+      }).catch(err => console.error("Sync error:", err));
+    }
+  }, [inputState, mode, roomId, isConnected]);
+
+  // Link Laptop Mouse to Virtual Cursor (Receiver side)
+  useEffect(() => {
+    if (mode === 'receiver') {
+      const handleMouseMove = (e: MouseEvent) => {
+        setMousePos({ x: e.clientX, y: e.clientY });
+      };
+      window.addEventListener('mousemove', handleMouseMove);
+      return () => window.removeEventListener('mousemove', handleMouseMove);
+    }
+  }, [mode]);
+
+  const lastClickTime = useRef(0);
   const handleKeyClick = (keyId: string) => {
     if (!roomId) return;
+
+    // Debounce backspace to prevent double-deletion
+    if (keyId === 'backspace') {
+      const now = Date.now();
+      if (now - lastClickTime.current < 100) return;
+      lastClickTime.current = now;
+    }
 
     if (keyId === 'mode') {
       const modes: InputMode[] = ['ko', 'en', 'num', 'sym'];
@@ -424,7 +504,7 @@ export default function App() {
       tapTimer.current = setTimeout(() => {
         setLastChar(null);
         setTapCount(0);
-      }, 800);
+      }, 500); // Reduced from 800ms for faster recognition
     } else {
       // New key
       if (tapTimer.current) clearTimeout(tapTimer.current);
@@ -436,7 +516,7 @@ export default function App() {
       if (!isVowel && inputMode !== 'num') {
         tapTimer.current = setTimeout(() => {
           setLastChar(null);
-        }, 800);
+        }, 500); // Reduced from 800ms for faster recognition
       } else {
         setLastChar(null);
       }
@@ -489,86 +569,116 @@ export default function App() {
   };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(getDisplayText());
+    const text = getDisplayText();
+    navigator.clipboard.writeText(text).then(() => {
+      addLog('Copied to clipboard!');
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 1000);
+    }).catch(err => {
+      console.error('Copy failed', err);
+    });
+  };
+
+  const copyPythonCommand = () => {
+    const cmd = `python -m pip install pyautogui firebase-admin pyperclip; python cheonjiin_helper.py`;
+    navigator.clipboard.writeText(cmd).then(() => {
+      addLog('Command copied!');
+    });
   };
 
   const getPythonScript = () => `
-import firebase_admin
-from firebase_admin import credentials, firestore
+import requests
 import pyautogui
 import time
-import threading
+import pyperclip
+import json
 
 # Optimize pyautogui for speed
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = True
 
-# 1. Download your service account key from Firebase Console
-# 2. Rename it to 'serviceAccountKey.json' and put it in the same folder
-try:
-    cred = credentials.Certificate('serviceAccountKey.json')
-    firebase_admin.initialize_app(cred)
-    db = firestore.client()
-except Exception as e:
-    print(f"Error initializing Firebase: {e}")
-    print("Please make sure 'serviceAccountKey.json' exists in the same folder.")
-    exit()
-
 room_id = '${roomId}'
+# Using a public Firestore REST API fallback or simple polling for easier setup
+# Note: For a real production app, Firebase Admin is better, but this is for "Easy Mode"
 print(f"Monitoring Room: {room_id}")
+print("Starting Cheonjiin Helper (Polling Mode)...")
 
 last_processed_timestamp = time.time() * 1000
 
-def on_snapshot(col_snapshot, changes, read_time):
+def process_event(event_data):
     global last_processed_timestamp
-    for change in changes:
-        if change.type.name == 'ADDED':
-            data = change.document.to_dict()
-            timestamp = data.get('timestamp', 0)
-            if timestamp <= last_processed_timestamp:
-                continue
-            last_processed_timestamp = timestamp
-            
-            etype = data.get('type')
-            edata = data.get('data', {})
-            
-            if etype == 'keypress':
-                char = edata.get('char')
-                print(f"Typing: {char}")
-                if ord(char) > 127: # If it's a non-ASCII character (like Korean)
-                    import pyperclip
-                    pyperclip.copy(char)
-                    if pyautogui._pyautogui_win: # Windows
-                        pyautogui.hotkey('ctrl', 'v')
-                    else: # Mac/Linux
-                        pyautogui.hotkey('command', 'v')
-                else:
-                    pyautogui.write(char)
-            elif etype == 'command':
-                cmd = edata.get('cmd')
-                print(f"Command: {cmd}")
-                if cmd == 'backspace': pyautogui.press('backspace')
-                elif cmd == 'space': pyautogui.press('space')
-                elif cmd == 'enter': pyautogui.press('enter')
-            elif etype == 'mouse-move':
-                dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-                pyautogui.moveRel(dx, dy)
-            elif etype == 'mouse-click':
-                btn = edata.get('button', 'left')
-                pyautogui.click(button=btn)
+    etype = event_data.get('type')
+    edata = event_data.get('data', {})
+    ts = event_data.get('timestamp', 0)
+    
+    if ts <= last_processed_timestamp:
+        return
+    last_processed_timestamp = ts
 
-doc_ref = db.collection('rooms').document(room_id)
-events_ref = doc_ref.collection('events')
-# Initial query to only get NEW events
-query = events_ref.where('timestamp', '>', last_processed_timestamp).order_by('timestamp')
-doc_watch = query.on_snapshot(on_snapshot)
+    if etype == 'keypress':
+        char = edata.get('char')
+        if not char: return
+        print(f"Typing: {char}")
+        if ord(char) > 127:
+            pyperclip.copy(char)
+            pyautogui.hotkey('ctrl', 'v')
+        else:
+            pyautogui.write(char)
+    elif etype == 'command':
+        cmd = edata.get('cmd')
+        print(f"Command: {cmd}")
+        if cmd == 'backspace': pyautogui.press('backspace')
+        elif cmd == 'space': pyautogui.press('space')
+        elif cmd == 'enter': pyautogui.press('enter')
+    elif etype == 'mouse-move':
+        dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+        pyautogui.moveRel(dx, dy)
+    elif etype == 'mouse-click':
+        btn = edata.get('button', 'left')
+        pyautogui.click(button=btn)
 
-print("Connected and waiting for events...")
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    pass
+# Polling loop using Firestore REST API
+# This allows the script to work without a serviceAccountKey.json file
+PROJECT_ID = "gen-lang-client-0554047813"
+DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
+API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
+
+BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}/events"
+
+while True:
+    try:
+        # Fetch events sorted by timestamp
+        params = {
+            "pageSize": 10,
+            "orderBy": "timestamp desc",
+            "key": API_KEY
+        }
+        response = requests.get(BASE_URL, params=params)
+        if response.status_code == 200:
+            events = response.json().get('documents', [])
+            # Process in chronological order (reverse of the 'desc' fetch)
+            for doc in reversed(events):
+                fields = doc.get('fields', {})
+                # Convert Firestore REST format to simple dict
+                event_data = {
+                    "type": fields.get('type', {}).get('stringValue'),
+                    "timestamp": int(fields.get('timestamp', {}).get('integerValue', 0)),
+                    "data": {
+                        "char": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('char', {}).get('stringValue'),
+                        "cmd": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('cmd', {}).get('stringValue'),
+                        "dx": float(fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('dx', {}).get('doubleValue', 0)),
+                        "dy": float(fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('dy', {}).get('doubleValue', 0)),
+                        "button": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('button', {}).get('stringValue', 'left')
+                    }
+                }
+                process_event(event_data)
+        
+        time.sleep(0.3) # Fast polling
+    except KeyboardInterrupt:
+        break
+    except Exception as e:
+        print(f"Polling error: {e}")
+        time.sleep(2)
 `.trim();
 
   const downloadHelper = () => {
@@ -649,6 +759,62 @@ except KeyboardInterrupt:
     const shareUrl = `${getBaseUrl()}?mode=sender&room=${roomId}`;
     const pythonScript = getPythonScript();
 
+    if (isCompact) {
+      return (
+        <div className="fixed bottom-4 right-4 w-80 bg-white border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] z-[10000] flex flex-col overflow-hidden">
+          <div className="bg-[#141414] text-white p-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span className="text-[10px] font-bold uppercase tracking-widest">Mini Mode</span>
+            </div>
+            <button onClick={() => setIsCompact(false)} className="p-1 hover:bg-white/20 rounded">
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="p-3 space-y-3">
+            <div className="relative">
+              <textarea 
+                value={getDisplayText()}
+                readOnly
+                onClick={copyToClipboard}
+                className="w-full h-32 p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
+                placeholder="Typing..."
+              />
+              <AnimatePresence>
+                {copyFeedback && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 flex items-center justify-center bg-blue-600/90 text-white font-bold rounded pointer-events-none"
+                  >
+                    복사됨! (Ctrl+V 하세요)
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={autoCopy} 
+                  onChange={(e) => setAutoCopy(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-[10px] font-bold uppercase text-gray-500">Auto Copy</span>
+              </label>
+              <button 
+                onClick={copyToClipboard}
+                className="px-3 py-1 bg-[#141414] text-white text-[10px] font-bold uppercase rounded hover:bg-gray-800"
+              >
+                Manual Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -684,43 +850,98 @@ except KeyboardInterrupt:
                   <button onClick={copyToClipboard} className="p-2 hover:bg-gray-100 rounded transition-colors" title="Copy">
                     <Copy className="w-4 h-4" />
                   </button>
+                  <button 
+                    onClick={() => setIsCompact(true)} 
+                    className="px-2 py-1 bg-blue-600 text-white text-[10px] uppercase font-bold hover:bg-blue-700 transition-colors rounded"
+                  >
+                    미니 모드
+                  </button>
                 </div>
               </div>
-              <textarea 
-                value={getDisplayText()}
-                readOnly
-                placeholder="핸드폰에서 타이핑을 시작하세요..."
-                className="w-full h-[300px] p-6 text-2xl font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none leading-relaxed"
+              <div className="relative">
+                <textarea 
+                  value={getDisplayText()}
+                  readOnly
+                  placeholder="핸드폰에서 타이핑을 시작하세요..."
+                  className="w-full h-[300px] p-6 text-2xl font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none leading-relaxed"
+                />
+                <AnimatePresence>
+                  {copyFeedback && (
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="absolute top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 z-10"
+                    >
+                      <Copy className="w-4 h-4" />
+                      클립보드에 복사됨!
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              
+              <div className="mt-4 flex items-center justify-between p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Copy className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-blue-900">스마트 클립보드 브릿지</h4>
+                    <p className="text-xs text-blue-700">핸드폰에서 입력이 끝나면 자동으로 노트북 클립보드에 저장됩니다.</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={autoCopy} 
+                    onChange={(e) => setAutoCopy(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  <span className="ml-3 text-xs font-bold text-blue-900 uppercase tracking-widest">자동 복사</span>
+                </label>
+              </div>
+              {/* Virtual Cursor */}
+              <div 
+                className="fixed w-4 h-4 bg-red-500 rounded-full pointer-events-none z-[9999] shadow-[0_0_10px_rgba(239,68,68,0.5)] transition-all duration-75"
+                style={{ left: mousePos.x, top: mousePos.y, transform: 'translate(-50%, -50%)' }}
               />
             </div>
 
             {/* Desktop Integration Section */}
             <div className="bg-[#141414] text-white p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)]">
-              <div className="flex items-center gap-3 mb-6">
-                <Monitor className="w-6 h-6 text-blue-400" />
-                <h2 className="text-xl font-bold tracking-tight">다른 창에 직접 입력하기 (데스크탑 모드)</h2>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <Monitor className="w-6 h-6 text-blue-400" />
+                  <h2 className="text-xl font-bold tracking-tight">다른 창에 직접 입력하기 (데스크탑 모드)</h2>
+                </div>
+                <button 
+                  onClick={copyPythonCommand}
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2"
+                >
+                  <Copy className="w-3 h-3" />
+                  설치 명령어 복사
+                </button>
               </div>
               
               <div className="grid md:grid-cols-2 gap-8">
                 <div className="space-y-4 text-sm text-gray-400 font-serif italic">
-                  <p>브라우저 밖(메모장, 카톡 등)에 직접 입력하려면 아래 파일을 다운로드하여 실행하세요.</p>
+                  <p className="text-blue-400 font-bold not-italic">가장 쉬운 방법:</p>
                   <ol className="list-decimal list-inside space-y-2">
-                    <li>
-                      <button 
-                        onClick={downloadHelper}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors inline-flex items-center gap-2 not-italic"
-                      >
-                        <Download className="w-4 h-4" />
-                        도우미 파일 다운로드 (.py)
-                      </button>
-                    </li>
-                    <li>Python 설치 후 터미널에서 실행:<br/>
-                      <code className="bg-white/10 text-blue-300 px-2 py-1 rounded mt-1 inline-block not-italic font-mono text-[10px]">
-                        pip install pyautogui firebase-admin pyperclip
-                      </code>
-                    </li>
-                    <li>다운로드한 파일을 실행하면 핸드폰 자판이 컴퓨터 전체에서 작동합니다!</li>
+                    <li>아래 <b>'도우미 파일 다운로드'</b>를 눌러 파일을 받으세요.</li>
+                    <li>파일이 있는 폴더(예: 다운로드)에서 터미널을 엽니다.</li>
+                    <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣으세요.</li>
+                    <li>터미널에서 <code className="text-white bg-white/10 px-1">python cheonjiin_helper.py</code>가 실행되면 끝!</li>
                   </ol>
+                  <div className="pt-4">
+                    <button 
+                      onClick={downloadHelper}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors inline-flex items-center gap-2 not-italic"
+                    >
+                      <Download className="w-4 h-4" />
+                      도우미 파일 다운로드 (.py)
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="relative">

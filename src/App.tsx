@@ -297,6 +297,12 @@ export default function App() {
 
     if (keyId === 'backspace') {
       emitEvent('command', { cmd: 'backspace' });
+      // Also update local state for preview
+      if (composition.length > 0) {
+        setComposition(prev => prev.slice(0, -1));
+      } else {
+        setCommittedText(prev => prev.slice(0, -1));
+      }
       setLastChar(null);
       setTapCount(0);
       return;
@@ -304,6 +310,10 @@ export default function App() {
 
     if (keyId === 'enter') {
       emitEvent('command', { cmd: 'enter' });
+      const processed = processCheonjiin(composition);
+      const assembled = Hangul.assemble(processed);
+      setCommittedText(prev => prev + (assembled || processed.join('')) + '\n');
+      setComposition([]);
       setLastChar(null);
       setTapCount(0);
       return;
@@ -311,6 +321,10 @@ export default function App() {
 
     if (keyId === 'space') {
       emitEvent('command', { cmd: 'space' });
+      const processed = processCheonjiin(composition);
+      const assembled = Hangul.assemble(processed);
+      setCommittedText(prev => prev + (assembled || processed.join('')) + ' ');
+      setComposition([]);
       setLastChar(null);
       setTapCount(0);
       return;
@@ -823,23 +837,16 @@ except KeyboardInterrupt:
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Preview */}
-              <div className="flex-1 flex items-center justify-center p-4 bg-white/50">
-                <div className="text-center">
-                  <div className="text-4xl font-light text-gray-800 min-h-[1.2em]">
-                    {(() => {
-                      try {
-                        if (!Hangul) return ' ';
-                        const processed = processCheonjiin(composition);
-                        const assembled = Hangul.assemble(processed);
-                        return assembled || processed.join('') || ' ';
-                      } catch (e) {
-                        return ' ';
-                      }
-                    })()}
+              <div className="flex-1 flex flex-col p-4 bg-white/50 overflow-hidden">
+                <div className="flex-1 flex items-center justify-center overflow-y-auto">
+                  <div className="text-center w-full">
+                    <div className="text-3xl font-medium text-gray-800 break-all px-4">
+                      {getDisplayText() || ' '}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-blue-500 font-bold uppercase mt-2">
-                    {inputMode === 'ko' ? '한글' : inputMode === 'en' ? 'English' : inputMode === 'num' ? '숫자' : '기호'}
-                  </div>
+                </div>
+                <div className="text-[10px] text-blue-500 font-bold uppercase mt-2 text-center">
+                  {inputMode === 'ko' ? '한글' : inputMode === 'en' ? 'English' : inputMode === 'num' ? '숫자' : '기호'}
                 </div>
               </div>
 
@@ -870,10 +877,11 @@ except KeyboardInterrupt:
                     <button
                       key={key.id}
                       onClick={() => handleKeyClick(key.id)}
-                      className="h-20 bg-white rounded-2xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
                     >
-                      <span className="absolute top-1.5 right-2 text-[14px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-2xl font-bold text-gray-800">{key.label}</span>
+                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
+                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
+                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
                     </button>
                   ))}
                   <button 
@@ -882,9 +890,9 @@ except KeyboardInterrupt:
                     onMouseLeave={stopBackspace}
                     onTouchStart={startBackspace}
                     onTouchEnd={stopBackspace}
-                    className="h-20 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
+                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
                   >
-                    <Delete className="w-8 h-8 text-gray-700" />
+                    <Delete className="w-6 h-6 text-gray-700" />
                   </button>
 
                   {/* Row 2 */}
@@ -892,17 +900,18 @@ except KeyboardInterrupt:
                     <button
                       key={key.id}
                       onClick={() => handleKeyClick(key.id)}
-                      className="h-20 bg-white rounded-2xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
                     >
-                      <span className="absolute top-1.5 right-2 text-[14px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-2xl font-bold text-gray-800">{key.label}</span>
+                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
+                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
+                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
                     </button>
                   ))}
                   <button 
                     onClick={() => handleKeyClick('enter')}
-                    className="h-20 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
+                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
                   >
-                    <CornerDownLeft className="w-8 h-8 text-gray-700" />
+                    <CornerDownLeft className="w-6 h-6 text-gray-700" />
                   </button>
 
                   {/* Row 3 */}
@@ -910,44 +919,45 @@ except KeyboardInterrupt:
                     <button
                       key={key.id}
                       onClick={() => handleKeyClick(key.id)}
-                      className="h-20 bg-white rounded-2xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
+                      className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 transition-all active:scale-95 relative overflow-hidden"
                     >
-                      <span className="absolute top-1.5 right-2 text-[14px] font-black text-gray-300">{key.id}</span>
-                      <span className="text-2xl font-bold text-gray-800">{key.label}</span>
+                      <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">{key.id}</span>
+                      <span className="text-xl font-bold text-gray-800">{key.label}</span>
+                      <span className="text-[8px] text-gray-400 uppercase font-bold">{key.en.join('')}</span>
                     </button>
                   ))}
                   <button 
                     onClick={() => handleKeyClick('space')}
-                    className="h-20 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200 active:scale-95 transition-all"
+                    className="h-16 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-200 active:scale-95 transition-all"
                   >
-                    <Space className="w-8 h-8 text-gray-700" />
+                    <Space className="w-6 h-6 text-gray-700" />
                   </button>
 
                   {/* Row 4 */}
                   <button 
                     onClick={() => setInputMode('sym')}
-                    className="h-20 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-sm font-black active:bg-gray-400 active:scale-95 transition-all"
+                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400 active:scale-95 transition-all"
                   >
                     !#1
                   </button>
                   <button 
                     onClick={() => handleKeyClick('0')}
-                    className="h-20 bg-white rounded-2xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 active:scale-95 transition-all relative"
+                    className="h-16 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-200 active:scale-95 transition-all relative"
                   >
-                    <span className="absolute top-1.5 right-2 text-[14px] font-black text-gray-300">0</span>
-                    <span className="text-2xl font-bold text-gray-800">ㅇㅁ</span>
+                    <span className="absolute top-1 right-1.5 text-[10px] font-black text-gray-300">0</span>
+                    <span className="text-xl font-bold text-gray-800">ㅇㅁ</span>
                   </button>
                   <button 
                     onClick={() => handleKeyClick('mode')}
-                    className="h-20 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-sm font-black active:bg-gray-400 active:scale-95 transition-all"
+                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold active:bg-gray-400 active:scale-95 transition-all"
                   >
                     한/영
                   </button>
                   <button 
                     onClick={() => sendCommand('clear')}
-                    className="h-20 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
+                    className="h-16 bg-[#B0B3BC] rounded-xl shadow-sm flex items-center justify-center active:bg-gray-400 active:scale-95 transition-all"
                   >
-                    <RefreshCw className="w-6 h-6 text-gray-700" />
+                    <RefreshCw className="w-5 h-5 text-gray-700" />
                   </button>
                 </div>
               )}

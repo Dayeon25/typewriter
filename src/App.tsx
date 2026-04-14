@@ -53,6 +53,8 @@ export default function App() {
   const [mode, setMode] = useState<'choice' | 'sender' | 'receiver'>('choice');
   const [inputMode, setInputMode] = useState<InputMode>('ko');
   const [activeTab, setActiveTab] = useState<MobileTab>('keyboard');
+  const [isAirMouseActive, setIsAirMouseActive] = useState(false);
+  const [mouseSensitivity, setMouseSensitivity] = useState(1.5);
   const [roomId, setRoomId] = useState('');
   const [committedText, setCommittedText] = useState('');
   const [composition, setComposition] = useState<string[]>([]);
@@ -433,8 +435,8 @@ def on_snapshot(doc_snapshot, changes, read_time):
             elif cmd == 'enter': pyautogui.press('enter')
         elif etype == 'mouse-move':
             dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            # Increased sensitivity and smoother movement
-            pyautogui.moveRel(dx * 1.5, dy * 1.5, duration=0.05)
+            # Instant movement for better responsiveness
+            pyautogui.moveRel(dx, dy)
         elif etype == 'mouse-click':
             btn = edata.get('button', 'left')
             pyautogui.click(button=btn)
@@ -658,7 +660,7 @@ except KeyboardInterrupt:
 
   // Sender (Mobile Keyboard)
   const handleTouchMove = (e: any) => {
-    if (activeTab !== 'mouse' || !roomId) return;
+    if (activeTab !== 'mouse' || !roomId || isAirMouseActive) return;
     const touch = e.touches[0];
     const now = Date.now();
     
@@ -666,14 +668,41 @@ except KeyboardInterrupt:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Throttle mouse moves to 50ms to avoid Firestore limits
-      if (now - lastMouseMoveTime.current > 50) {
-        emitEvent('mouse-move', { dx: dx * 3, dy: dy * 3 }); // Increased sensitivity
+      // Throttle mouse moves to 30ms for better responsiveness
+      if (now - lastMouseMoveTime.current > 30) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }
     }
     mouseRef.current = { x: touch.clientX, y: touch.clientY };
   };
+
+  // Air Mouse (Gyroscope) Logic
+  useEffect(() => {
+    if (!isAirMouseActive || activeTab !== 'mouse' || !roomId) return;
+
+    let lastX = 0;
+    let lastY = 0;
+    let lastTime = Date.now();
+
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      const now = Date.now();
+      if (now - lastTime < 40) return; // Throttle
+
+      // Use beta (tilt front/back) and gamma (tilt left/right)
+      const dx = (e.gamma || 0);
+      const dy = (e.beta || 0);
+
+      // Simple deadzone and scaling
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 0.5, dy: dy * mouseSensitivity * 0.5 });
+        lastTime = now;
+      }
+    };
+
+    window.addEventListener('deviceorientation', handleOrientation);
+    return () => window.removeEventListener('deviceorientation', handleOrientation);
+  }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
 
   const handleTouchEnd = () => {
     mouseRef.current = { x: 0, y: 0 };
@@ -826,33 +855,80 @@ except KeyboardInterrupt:
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col p-6"
+            className="flex-1 flex flex-col p-4 gap-4"
           >
+            {/* Sensitivity & Air Mouse Controls */}
+            <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sensitivity</div>
+                <input 
+                  type="range" 
+                  min="0.5" 
+                  max="5" 
+                  step="0.1" 
+                  value={mouseSensitivity}
+                  onChange={(e) => setMouseSensitivity(parseFloat(e.target.value))}
+                  className="w-24 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
+              <button 
+                onClick={() => {
+                  if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+                    (DeviceOrientationEvent as any).requestPermission()
+                      .then((permissionState: string) => {
+                        if (permissionState === 'granted') {
+                          setIsAirMouseActive(!isAirMouseActive);
+                        }
+                      });
+                  } else {
+                    setIsAirMouseActive(!isAirMouseActive);
+                  }
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${isAirMouseActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-gray-100 text-gray-500'}`}
+              >
+                <RefreshCw className={`w-3 h-3 ${isAirMouseActive ? 'animate-spin' : ''}`} />
+                Air Mouse {isAirMouseActive ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
             <div 
-              className="flex-1 bg-white rounded-3xl border border-gray-200 shadow-sm flex items-center justify-center relative overflow-hidden"
+              className={`flex-1 rounded-3xl border-2 flex items-center justify-center relative overflow-hidden transition-all ${isAirMouseActive ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200 shadow-sm'}`}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
             >
               <div className="text-gray-300 flex flex-col items-center gap-4 pointer-events-none">
-                <MousePointer2 className="w-20 h-20 opacity-20" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">Trackpad</span>
+                {isAirMouseActive ? (
+                  <>
+                    <RefreshCw className="w-20 h-20 text-blue-200 animate-pulse" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-blue-400">Tilt to Move</span>
+                  </>
+                ) : (
+                  <>
+                    <MousePointer2 className="w-20 h-20 opacity-20" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">Trackpad</span>
+                  </>
+                )}
               </div>
               
-              <div className="absolute bottom-8 left-8 right-8 h-24 flex gap-4">
+              <div className="absolute bottom-6 left-6 right-6 h-28 flex gap-4">
                 <button 
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 transition-colors flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500"
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
                   onClick={() => emitEvent('mouse-click', { button: 'left' })}
                 >
-                  Left
+                  Left Click
                 </button>
                 <button 
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 transition-colors flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500"
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl active:bg-gray-200 active:scale-95 transition-all flex items-center justify-center font-bold uppercase text-[10px] tracking-widest text-gray-500 shadow-sm"
                   onClick={() => emitEvent('mouse-click', { button: 'right' })}
                 >
-                  Right
+                  Right Click
                 </button>
               </div>
             </div>
+            
+            <p className="text-[10px] text-center text-gray-400 italic">
+              {isAirMouseActive ? "핸드폰을 기울여서 마우스를 움직이세요" : "트랙패드를 문질러서 마우스를 움직이세요"}
+            </p>
           </motion.div>
         )}
       </AnimatePresence>

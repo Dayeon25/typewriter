@@ -594,16 +594,22 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0
+pyautogui.PAUSE = 0.01
 pyautogui.FAILSAFE = True
 
 room_id = '${roomId}'
-# Using a public Firestore REST API fallback or simple polling for easier setup
-# Note: For a real production app, Firebase Admin is better, but this is for "Easy Mode"
-print(f"Monitoring Room: {room_id}")
-print("Starting Cheonjiin Helper (Polling Mode)...")
+PROJECT_ID = "gen-lang-client-0554047813"
+DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
+API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
 
-last_processed_timestamp = time.time() * 1000
+print(f"Monitoring Room: {room_id}")
+print("Starting Cheonjiin Helper (Real-time Polling)...")
+print("--------------------------------------------------")
+print("1. Click the window you want to type into.")
+print("2. Use your phone to type or move the mouse.")
+print("--------------------------------------------------")
+
+last_processed_timestamp = int(time.time() * 1000)
 
 def process_event(event_data):
     global last_processed_timestamp
@@ -619,7 +625,7 @@ def process_event(event_data):
         char = edata.get('char')
         if not char: return
         print(f"Typing: {char}")
-        if ord(char) > 127:
+        if ord(char) > 127: # Korean/Special
             pyperclip.copy(char)
             pyautogui.hotkey('ctrl', 'v')
         else:
@@ -632,53 +638,72 @@ def process_event(event_data):
         elif cmd == 'enter': pyautogui.press('enter')
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+        # Move the ACTUAL laptop mouse
         pyautogui.moveRel(dx, dy)
     elif etype == 'mouse-click':
         btn = edata.get('button', 'left')
+        print(f"Click: {btn}")
         pyautogui.click(button=btn)
 
-# Polling loop using Firestore REST API
-# This allows the script to work without a serviceAccountKey.json file
-PROJECT_ID = "gen-lang-client-0554047813"
-DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
-API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
-
-BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}/events"
+# Polling loop using runQuery for better performance
+query_body = {
+    "structuredQuery": {
+        "from": [{"collectionId": "events"}],
+        "where": {
+            "compositeFilter": {
+                "op": "AND",
+                "filters": [
+                    {
+                        "fieldFilter": {
+                            "field": {"fieldPath": "timestamp"},
+                            "op": "GREATER_THAN",
+                            "value": {"integerValue": 0} # Will be updated in loop
+                        }
+                    }
+                ]
+            }
+        },
+        "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
+    }
+}
 
 while True:
     try:
-        # Fetch events sorted by timestamp
-        params = {
-            "pageSize": 10,
-            "orderBy": "timestamp desc",
-            "key": API_KEY
-        }
-        response = requests.get(BASE_URL, params=params)
+        # Update query with last timestamp to get only NEW events
+        query_body["structuredQuery"]["where"]["compositeFilter"]["filters"][0]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
+        
+        # The events are subcollections of rooms/{room_id}/events
+        parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
+        response = requests.post(f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", json=query_body)
+        
         if response.status_code == 200:
-            events = response.json().get('documents', [])
-            # Process in chronological order (reverse of the 'desc' fetch)
-            for doc in reversed(events):
+            results = response.json()
+            for res in results:
+                doc = res.get('document')
+                if not doc: continue
                 fields = doc.get('fields', {})
-                # Convert Firestore REST format to simple dict
+                
+                # Extract data
                 event_data = {
                     "type": fields.get('type', {}).get('stringValue'),
                     "timestamp": int(fields.get('timestamp', {}).get('integerValue', 0)),
-                    "data": {
-                        "char": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('char', {}).get('stringValue'),
-                        "cmd": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('cmd', {}).get('stringValue'),
-                        "dx": float(fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('dx', {}).get('doubleValue', 0)),
-                        "dy": float(fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('dy', {}).get('doubleValue', 0)),
-                        "button": fields.get('data', {}).get('mapValue', {}).get('fields', {}).get('button', {}).get('stringValue', 'left')
-                    }
+                    "data": {}
                 }
+                
+                raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
+                for k, v in raw_data.items():
+                    if 'stringValue' in v: event_data['data'][k] = v['stringValue']
+                    elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
+                    elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
+                
                 process_event(event_data)
         
-        time.sleep(0.3) # Fast polling
+        time.sleep(0.1) # Faster polling
     except KeyboardInterrupt:
         break
     except Exception as e:
-        print(f"Polling error: {e}")
-        time.sleep(2)
+        print(f"Error: {e}")
+        time.sleep(1)
 `.trim();
 
   const downloadHelper = () => {

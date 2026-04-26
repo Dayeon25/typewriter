@@ -353,6 +353,13 @@ export default function App() {
             } else if (event.type === 'click' || event.type === 'mouse-click') {
               const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
               if (el instanceof HTMLElement) el.click();
+            } else if (event.type === 'keydown' || event.type === 'key-down') {
+              const key = event.data.key;
+              if (key === 'Backspace') {
+                setText(prev => prev.slice(0, -1));
+              } else if (key?.length === 1) {
+                setText(prev => prev + key);
+              }
             }
           }
         });
@@ -511,6 +518,9 @@ export default function App() {
           const assembled = Hangul.assemble(processed);
           nextCommittedText = committedText + (assembled || processed.join('')) + input;
           nextComposition = [];
+          
+          // Emit typing event for non-korean or non-composition characters
+          emitEvent('key-down', { key: input });
         }
       }
 
@@ -1845,7 +1855,7 @@ if __name__ == "__main__":
       )}
 
       {/* Bottom Bar */}
-      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-3 rounded-full shrink-0"></div>
+      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-10 rounded-full shrink-0"></div>
     </div>
   );
 }

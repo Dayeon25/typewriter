@@ -716,14 +716,20 @@ API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
 # Get room_id from command line if provided
 if len(sys.argv) > 1:
     room_id = sys.argv[1]
-else:
-    print(f"Defaulting to Room ID from script: {room_id}")
+
+if not room_id:
+    room_id = input("연결할 룸번호를 입력하세요: ").strip().upper()
+
+if not room_id:
+    print("오류: 룸번호가 필요합니다.")
+    sys.exit(1)
 
 print(f"\\nMonitoring Room: {room_id}")
-print("Starting Cheonjiin Helper (v2.0 - Stabilized)...")
+print("Starting Cheonjiin Helper (v2.1 - Enhanced Security & Focus)...")
 print("--------------------------------------------------")
 print("1. Click the target window to start typing.")
 print("2. Type on your phone - it will sync automatically.")
+print("3. macOS users: If keyboard doesn't work, allow accessibility permissions for Terminal.")
 print("--------------------------------------------------")
 
 last_processed_timestamp = int(time.time() * 1000)
@@ -836,12 +842,13 @@ while True:
                 
             first_run = False
         
-        time.sleep(0.05)
+        time.sleep(0.2)
         
     except KeyboardInterrupt:
         break
     except Exception as e:
-        time.sleep(0.5)
+        print(f"Error: {e}")
+        time.sleep(2)
 `.trim();
 
   const downloadHelper = () => {
@@ -1143,6 +1150,12 @@ while True:
                     className="px-2 py-1 border border-[#141414]/20 text-[10px] uppercase font-bold hover:bg-gray-100 transition-colors"
                   >
                     새로고침
+                  </button>
+                  <button 
+                    onClick={() => setMode('choice')}
+                    className="px-2 py-1 border border-red-200 text-red-600 text-[10px] uppercase font-bold hover:bg-red-50 transition-colors"
+                  >
+                    초기화면
                   </button>
                   <button 
                     onClick={() => {

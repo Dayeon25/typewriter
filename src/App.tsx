@@ -187,14 +187,17 @@ export default function App() {
     isLongPress.current = false;
   };
   
-  // Sender Heartbeat/Keepalive
+    // Sender Heartbeat/Keepalive
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
 
     const interval = setInterval(() => {
       const roomRef = doc(db, 'rooms', roomId);
-      updateDoc(roomRef, { heartbeat: serverTimestamp() }).catch(() => {});
-    }, 60000); // Pulse every 60s to save quota
+      // Only update if tab is focused to save quota
+      if (document.visibilityState === 'visible') {
+        updateDoc(roomRef, { heartbeat: serverTimestamp() }).catch(() => {});
+      }
+    }, 120000); // Pulse every 120s (2 minutes) to save quota
     
     return () => clearInterval(interval);
   }, [mode, roomId, isConnected]);
@@ -498,7 +501,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 50); // Small buffer to allow composition to stabilize
+    }, 300); // Buffer to allow composition to stabilize and batch keystrokes to save quota
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -506,14 +509,22 @@ export default function App() {
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
 
-  // Sync state to Firestore (Sender -> Receiver)
+  // Sync state to Firestore (Sender -> Receiver) - THROTTLED
   useEffect(() => {
     if (mode === 'sender' && roomId && isConnected) {
-      const roomRef = doc(db, 'rooms', roomId);
-      updateDoc(roomRef, {
-        inputState: inputState,
-        lastUpdate: serverTimestamp()
-      }).catch(err => console.error("Sync error:", err));
+      const timeout = setTimeout(() => {
+        const roomRef = doc(db, 'rooms', roomId);
+        updateDoc(roomRef, {
+          inputState: inputState,
+          lastUpdate: serverTimestamp()
+        }).catch(err => {
+          if (err.message.includes('Quota limit exceeded')) {
+            setConnectionError("Firestore quota exceeded.");
+          }
+          console.error("Sync error:", err);
+        });
+      }, 500); // Sync full state every 500ms minimum
+      return () => clearTimeout(timeout);
     }
   }, [inputState, mode, roomId, isConnected]);
 
@@ -842,7 +853,11 @@ while True:
                 
             first_run = False
         
-        time.sleep(0.2)
+        # Slower polling to preserve Firestore free quota
+        if len(results) > 1: # If we just got events, check again sooner
+            time.sleep(0.3)
+        else:
+            time.sleep(1.0)
         
     except KeyboardInterrupt:
         break
@@ -871,8 +886,8 @@ while True:
 
     const handleOrientation = (e: DeviceOrientationEvent) => {
       const now = Date.now();
-      // Improved frequency for better UX (150ms)
-      if (now - lastTime < 150) return;
+      // Even slower mouse moves - 333ms (3 times per second)
+      if (now - lastTime < 333) return;
 
       // Use beta (tilt front/back) and gamma (tilt left/right)
       const dx = (e.gamma || 0);
@@ -897,9 +912,16 @@ while True:
     }
   };
 
+  const quotaBanner = connectionError && connectionError.toLowerCase().includes('quota') ? (
+    <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-[10px] font-bold z-[100000] shadow-lg animate-pulse whitespace-nowrap">
+      ⚠️ FIRESTORE 무료 할당량 초과: 연결이 일시적으로 중단되었습니다. (내일 초기화)
+    </div>
+  ) : null;
+
   if (mode === 'choice') {
     return (
       <div className="min-h-screen bg-[#E4E3E0] flex flex-col items-center justify-center p-6 font-sans">
+        {quotaBanner}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1023,6 +1045,7 @@ while True:
     // Render Compact UI (for normal floating or PiP)
     const renderCompactUI = () => (
       <div className={`${pipWindow ? 'w-full h-full p-4' : 'fixed bottom-4 right-4 w-80 z-[10000] border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'} bg-white flex flex-col overflow-hidden`}>
+        {quotaBanner}
         <div className="bg-[#141414] text-white p-2 flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -1080,7 +1103,8 @@ while True:
     if (pipWindow) {
       const pipRoot = pipWindow.document.getElementById('pip-root');
       return (
-        <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-12">
+        <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-12 relative overflow-hidden">
+          {quotaBanner}
           <div className="text-center space-y-4">
             <motion.div 
               initial={{ scale: 0.9 }}
@@ -1108,7 +1132,8 @@ while True:
     }
 
     return (
-      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
+      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans relative">
+        {quotaBanner}
         {isAutoPipTriggered && !pipWindow && (
           <div className="fixed inset-0 bg-black/60 z-[10001] flex items-center justify-center p-6 backdrop-blur-sm">
             <div className="bg-white p-8 rounded-2xl shadow-2xl text-center max-w-xs w-full border-4 border-blue-600">
@@ -1339,8 +1364,8 @@ while True:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Improved frequency for better UX (100ms)
-      if (now - lastMouseMoveTime.current > 100) {
+      // Even slower mouse moves - 250ms (4 times per second)
+      if (now - lastMouseMoveTime.current > 250) {
         emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }

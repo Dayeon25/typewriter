@@ -853,11 +853,10 @@ while True:
                 
             first_run = False
         
-        # Slower polling to preserve Firestore free quota
-        if len(results) > 1: # If we just got events, check again sooner
-            time.sleep(0.3)
-        else:
-            time.sleep(1.0)
+        # Slower polling to save Firestore free quota
+        # Each query uses 1 read operations. 
+        # 1-sec poll uses ~3600 reads/hour.
+        time.sleep(1.2)
         
     except KeyboardInterrupt:
         break
@@ -1057,13 +1056,29 @@ while True:
             </button>
           )}
         </div>
-        <div className="p-3 space-y-3 flex-1 flex flex-col">
-          <div className="relative flex-1">
+        <div className="p-3 space-y-2 flex-1 flex flex-col overflow-hidden">
+          <div className="flex gap-1 shrink-0">
+            <button 
+              onClick={downloadHelper}
+              className="flex-1 bg-blue-600 text-white text-[9px] py-1 font-bold rounded hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1"
+            >
+              <Download className="w-2.5 h-2.5" />
+              헬퍼 받기
+            </button>
+            <button 
+              onClick={copyPythonCommand}
+              className="flex-1 bg-gray-800 text-white text-[9px] py-1 font-bold rounded hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-1"
+            >
+              <Copy className="w-2.5 h-2.5" />
+              설치명령 복사
+            </button>
+          </div>
+          <div className="relative flex-1 min-h-0">
             <textarea 
               value={getDisplayText()}
               readOnly
               onClick={copyToClipboard}
-              className="w-full h-full min-h-[200px] p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
+              className="w-full h-full p-2 text-base font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
               placeholder="Typing..."
             />
             <AnimatePresence>
@@ -1279,9 +1294,10 @@ while True:
                   <ol className="list-decimal list-inside space-y-2">
                     <li><a href="https://www.python.org/downloads/" target="_blank" rel="noreferrer" className="underline text-blue-300">Python</a>이 설치되어 있어야 합니다.</li>
                     <li>아래 <b>'도우미 파일 다운로드'</b>를 눌러 파일을 받으세요.</li>
-                    <li>파일이 있는 폴더에서 터미널을 엽니다.</li>
-                    <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣으세요.</li>
-                    <li>이제 룸번호가 바뀌어도 터미널에서 <b>직접 입력</b>해 연결할 수 있습니다!</li>
+                    <li>파일이 있는 폴더에서 터미널(CMD)을 엽니다.</li>
+                    <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣어 필요한 라이브러리를 먼저 설치하세요.</li>
+                    <li>이제 `python cheonjiin_helper.py` 명령어로 실행한 후 룸번호를 입력하세요.</li>
+                    <li className="text-red-400 font-bold not-italic">Mac 사용자 필독: 만약 키보드 입력이 안 된다면 [시스템 설정 &gt; 개인정보 보호 및 보안 &gt; 손쉬운 사용]에서 터미널(Terminal)을 허용해 주세요.</li>
                     <li className="text-xs text-gray-500">팁: 카카오톡 잠금화면 등에서는 숫자 패드를 직접 클릭하거나 핸드폰의 숫자 모드로 입력하세요.</li>
                   </ol>
                   <div className="pt-4">

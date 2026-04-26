@@ -274,10 +274,13 @@ export default function App() {
 
     addLog(`Connecting to socket node: ${roomId}`);
     
+    // Fast Polling first is much more reliable in proxied environments
     const socket = io({
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
-      reconnectionAttempts: 20
+      reconnectionAttempts: 30,
+      reconnectionDelay: 1000,
+      path: '/socket.io/'
     });
     socketRef.current = socket;
 

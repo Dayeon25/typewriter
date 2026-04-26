@@ -122,6 +122,7 @@ export default function App() {
   const [lastSentDisplay, setLastSentDisplay] = useState('');
   const [lastSentTimestamp, setLastSentTimestamp] = useState(0);
   const [pipWindow, setPipWindow] = useState<any>(null);
+  const [isAutoPipTriggered, setIsAutoPipTriggered] = useState(false);
 
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
@@ -133,7 +134,71 @@ export default function App() {
   const [hasError, setHasError] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPress = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autoPip') === 'true' && !isInIframe() && !isAutoPipTriggered) {
+      setIsAutoPipTriggered(true);
+      // Wait a bit for the page to load and then try to toggle PiP
+      // Note: This might still require a user gesture, but we'll try
+      const timer = setTimeout(() => {
+        togglePip();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [mode, isAutoPipTriggered]);
+
+  const handlePointerDown = (keyId: string) => {
+    isLongPress.current = false;
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+
+    // Only for numeric/jamo keys
+    const config = KEYPAD_CONFIG.find(k => k.id === keyId);
+    if (config && inputMode === 'ko') {
+      longPressTimer.current = setTimeout(() => {
+        isLongPress.current = true;
+        // Trigger number input
+        handleInput(config.num[0]);
+        // Visual/haptic feedback if possible
+        if ('vibrate' in navigator) navigator.vibrate(50);
+      }, 600); // 600ms for long press
+    }
+  };
+
+  const handlePointerUp = (keyId: string) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+
+    if (!isLongPress.current) {
+      handleKeyClick(keyId);
+    }
+    isLongPress.current = false;
+  };
+
+  const handlePointerLeave = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    isLongPress.current = false;
+  };
   
+  // Sender Heartbeat/Keepalive
+  useEffect(() => {
+    if (mode !== 'sender' || !roomId || !isConnected) return;
+
+    const interval = setInterval(() => {
+      const roomRef = doc(db, 'rooms', roomId);
+      updateDoc(roomRef, { heartbeat: serverTimestamp() }).catch(() => {});
+    }, 60000); // Pulse every 60s to save quota
+    
+    return () => clearInterval(interval);
+  }, [mode, roomId, isConnected]);
+
   // Viewport Height Fix for Mobile
   useEffect(() => {
     const setVh = () => {
@@ -190,36 +255,49 @@ export default function App() {
     });
 
     // Listen for events (Receiver logic - Mouse/Clicks only)
-    const q = query(eventsRef, where('timestamp', '>', lastProcessedTimestamp), orderBy('timestamp', 'asc'), orderBy('seq', 'asc'));
-    const unsubEvents = onSnapshot(q, (snapshot) => {
-      if (mode !== 'receiver') return;
+    let unsubEvents = () => {};
+    if (mode === 'receiver') {
+      const q = query(
+        eventsRef, 
+        where('timestamp', '>', lastProcessedTimestamp), 
+        orderBy('timestamp', 'asc'),
+        limit(50) // Limit to recent events to save reads
+      );
       
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const event = change.doc.data();
-          if (event.timestamp > lastProcessedTimestamp) {
-            lastProcessedTimestamp = event.timestamp;
-            if (event.type === 'mousemove' || event.type === 'mouse-move') {
-              const dx = event.data.dx || 0;
-              const dy = event.data.dy || 0;
-              setMousePos(prev => {
-                const newPos = {
-                  x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
-                  y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
-                };
-                return newPos;
-              });
-            } else if (event.type === 'click' || event.type === 'mouse-click') {
-              const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
-              if (el instanceof HTMLElement) el.click();
+      unsubEvents = onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const event = change.doc.data();
+            if (event.timestamp > lastProcessedTimestamp) {
+              lastProcessedTimestamp = event.timestamp;
+              if (event.type === 'mousemove' || event.type === 'mouse-move') {
+                const dx = event.data.dx || 0;
+                const dy = event.data.dy || 0;
+                setMousePos(prev => {
+                  const newPos = {
+                    x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+                    y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+                  };
+                  return newPos;
+                });
+              } else if (event.type === 'click' || event.type === 'mouse-click') {
+                const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+                if (el instanceof HTMLElement) el.click();
+              } else if (event.type === 'sync-text') {
+                // Handled via room snapshot's inputState for better consistency
+              }
             }
           }
+        });
+      }, (err) => {
+        if (err.message.includes('Quota limit exceeded')) {
+          setConnectionError("Firestore quota exceeded. Please try again later (resets daily).");
+        } else {
+          setConnectionError(err.message);
         }
+        addLog(`Firebase error: ${err.message}`);
       });
-    }, (err) => {
-      setConnectionError(err.message);
-      addLog(`Firebase error: ${err.message}`);
-    });
+    }
 
     return () => {
       unsubRoom();
@@ -263,17 +341,10 @@ export default function App() {
   // Emit Event Helper
   const emitEvent = async (type: string, data: any) => {
     if (!roomId) return;
-    addLog(`Emitting ${type}`);
     try {
       const roomRef = doc(db, 'rooms', roomId);
       const eventsRef = collection(roomRef, 'events');
       
-      // Update room heartbeat
-      setDoc(roomRef, { 
-        id: roomId, 
-        updatedAt: serverTimestamp() 
-      }, { merge: true });
-
       // Add event to subcollection
       await addDoc(eventsRef, {
         type,
@@ -760,7 +831,7 @@ while True:
                 
             first_run = False
         
-        time.sleep(0.01)
+        time.sleep(0.2)
         
     except KeyboardInterrupt:
         break
@@ -788,7 +859,8 @@ while True:
 
     const handleOrientation = (e: DeviceOrientationEvent) => {
       const now = Date.now();
-      if (now - lastTime < 40) return; // Throttle
+      // Even slower air mouse (400ms = ~2.5 times per sec)
+      if (now - lastTime < 400) return;
 
       // Use beta (tilt front/back) and gamma (tilt left/right)
       const dx = (e.gamma || 0);
@@ -873,8 +945,11 @@ while True:
 
   const togglePip = async () => {
     if (isInIframe()) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('autoPip', 'true');
+      window.open(url.toString(), '_blank');
       setIsCompact(true);
-      addLog("PiP mode is only available in a new tab. Opening in 'Mini Mode' instead.");
+      addLog("새 창에서 미니 모드를 실행 중입니다...");
       return;
     }
 
@@ -914,6 +989,7 @@ while True:
         pipWindow.addEventListener('pagehide', () => {
           setPipWindow(null);
           setIsCompact(false);
+          setIsAutoPipTriggered(false);
         });
       } catch (err) {
         console.error('PiP failed', err);
@@ -1001,12 +1077,12 @@ while True:
             >
               <Monitor className="w-10 h-10" />
             </motion.div>
-            <h2 className="text-3xl font-bold tracking-tight">화면이 분리되었습니다</h2>
-            <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 창이 떠 있을 거예요!</p>
+            <h2 className="text-3xl font-bold tracking-tight">미니 모드가 실행 중입니다</h2>
+            <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 미니 창이 떠 있을 거예요!</p>
             <div className="pt-8">
               <button onClick={() => pipWindow.close()} className="px-8 py-3 bg-[#141414] text-white rounded-xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center gap-2 mx-auto">
                 <Monitor className="w-5 h-5" />
-                메인 화면으로 합치기
+                메인화면으로 돌아가기
               </button>
             </div>
           </div>
@@ -1021,6 +1097,30 @@ while True:
 
     return (
       <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
+        {isAutoPipTriggered && !pipWindow && (
+          <div className="fixed inset-0 bg-black/60 z-[10001] flex items-center justify-center p-6 backdrop-blur-sm">
+            <div className="bg-white p-8 rounded-2xl shadow-2xl text-center max-w-xs w-full border-4 border-blue-600">
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"
+              >
+                <Monitor className="w-8 h-8 text-blue-600" />
+              </motion.div>
+              <h3 className="text-xl font-bold mb-4">미니 모드 준비 완료</h3>
+              <p className="text-sm text-gray-500 mb-6">보안 정책상 버튼을 눌러야<br/>미니 창이 활성화됩니다.</p>
+              <button 
+                onClick={() => {
+                  setIsAutoPipTriggered(false); // Clear the overlay intent
+                  togglePip();
+                }}
+                className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all text-lg"
+              >
+                미니 모드 시작하기
+              </button>
+            </div>
+          </div>
+        )}
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Main Display */}
           <div className="lg:col-span-8 space-y-6">
@@ -1057,20 +1157,11 @@ while True:
                   <button 
                     onClick={togglePip} 
                     className="px-2 py-1 bg-blue-600 text-white text-[10px] uppercase font-bold hover:bg-blue-700 transition-colors rounded flex items-center gap-1"
-                    title={isInIframe() ? "새 창에서 열어야 화면 분리(PiP) 기능을 쓸 수 있습니다." : "화면 구석에 작은 창으로 띄우기"}
+                    title={isInIframe() ? "새 창에서 열어야 미니 모드(PiP) 기능을 쓸 수 있습니다." : "화면 구석에 작은 창으로 띄우기"}
                   >
                     <ExternalLink className="w-3 h-3" />
-                    {isInIframe() ? "미니 모드" : "화면 분리 (PiP)"}
+                    미니 모드
                   </button>
-                  {isInIframe() && (
-                    <button 
-                      onClick={() => window.open(window.location.href, '_blank')}
-                      className="px-2 py-1 border border-blue-600 text-blue-600 text-[10px] uppercase font-bold hover:bg-blue-50 transition-colors rounded flex items-center gap-1"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      새 창에서 열기
-                    </button>
-                  )}
                 </div>
               </div>
               <div className="relative">
@@ -1230,8 +1321,8 @@ while True:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Throttle mouse moves to 20ms for better responsiveness
-      if (now - lastMouseMoveTime.current > 20) {
+      // Throttle mouse moves to 250ms to save quota
+      if (now - lastMouseMoveTime.current > 250) {
         emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }
@@ -1475,7 +1566,9 @@ while True:
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onPointerDown={() => handlePointerDown(key.id)}
+                        onPointerUp={() => handlePointerUp(key.id)}
+                        onPointerLeave={handlePointerLeave}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1499,7 +1592,9 @@ while True:
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onPointerDown={() => handlePointerDown(key.id)}
+                        onPointerUp={() => handlePointerUp(key.id)}
+                        onPointerLeave={handlePointerLeave}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1519,7 +1614,9 @@ while True:
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onPointerDown={() => handlePointerDown(key.id)}
+                        onPointerUp={() => handlePointerUp(key.id)}
+                        onPointerLeave={handlePointerLeave}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1553,7 +1650,9 @@ while True:
                       </button>
                     </div>
                     <button 
-                      onClick={() => handleKeyClick('0')}
+                      onPointerDown={() => handlePointerDown('0')}
+                      onPointerUp={() => handlePointerUp('0')}
+                      onPointerLeave={handlePointerLeave}
                       className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>

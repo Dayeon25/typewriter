@@ -56,6 +56,15 @@ async function startServer() {
 
   const PORT = 3000;
 
+  // Error handling for httpServer
+  httpServer.on('error', (e: any) => {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`[SERVER] Port ${PORT} is already in use. Please wait a moment or restart again.`);
+    } else {
+      console.error("[SERVER] HTTP Server error:", e);
+    }
+  });
+
   // Socket.io logic
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
@@ -110,8 +119,16 @@ async function startServer() {
   }
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[SERVER] Started successfully on port ${PORT}`);
+    console.log(`[SERVER] Listening on all interfaces (0.0.0.0)`);
+  });
+
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("[SERVER] Failed to start:", err);
+  process.exit(1);
+});

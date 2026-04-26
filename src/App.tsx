@@ -268,12 +268,16 @@ export default function App() {
   useEffect(() => {
     if (!roomId) return;
     
+    // Test API health
+    fetch('/api/health').then(r => r.json()).then(data => addLog(`API check: ${JSON.stringify(data)}`))
+      .catch(e => addLog(`API check failed: ${e.message}`));
+
     addLog(`Connecting to socket node: ${roomId}`);
     
     const socket = io({
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 10
+      reconnectionAttempts: 20
     });
     socketRef.current = socket;
 
@@ -286,7 +290,7 @@ export default function App() {
 
     socket.on('connect_error', (err) => {
       addLog(`Socket error: ${err.message}`);
-      setConnectionError('Connection refused. Is the server running?');
+      setConnectionError(`Connection failed: ${err.message}. Please refresh or check if the server is starting.`);
     });
 
     socket.on('room-sync', (data) => {

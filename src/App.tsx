@@ -257,19 +257,21 @@ export default function App() {
     // Listen for events (Receiver logic - Mouse/Clicks only)
     let unsubEvents = () => {};
     if (mode === 'receiver') {
+      let lastProcessedSeq = -1;
       const q = query(
         eventsRef, 
-        where('timestamp', '>', lastProcessedTimestamp), 
+        where('timestamp', '>=', lastProcessedTimestamp), 
         orderBy('timestamp', 'asc'),
-        limit(50) // Limit to recent events to save reads
+        limit(50)
       );
       
       unsubEvents = onSnapshot(q, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const event = change.doc.data();
-            if (event.timestamp > lastProcessedTimestamp) {
+            if (event.timestamp > lastProcessedTimestamp || (event.timestamp === lastProcessedTimestamp && event.seq > lastProcessedSeq)) {
               lastProcessedTimestamp = event.timestamp;
+              lastProcessedSeq = event.seq;
               if (event.type === 'mousemove' || event.type === 'mouse-move') {
                 const dx = event.data.dx || 0;
                 const dy = event.data.dy || 0;
@@ -283,8 +285,6 @@ export default function App() {
               } else if (event.type === 'click' || event.type === 'mouse-click') {
                 const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
                 if (el instanceof HTMLElement) el.click();
-              } else if (event.type === 'sync-text') {
-                // Handled via room snapshot's inputState for better consistency
               }
             }
           }
@@ -727,6 +727,7 @@ print("2. Type on your phone - it will sync automatically.")
 print("--------------------------------------------------")
 
 last_processed_timestamp = int(time.time() * 1000)
+last_processed_seq = -1
 session = requests.Session()
 first_run = True
 
@@ -792,6 +793,8 @@ print("Connected! Waiting for input...")
 while True:
     try:
         query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
+        # Use GREATER_THAN_OR_EQUAL to catch events with same timestamp but different seq
+        query_body["structuredQuery"]["where"]["fieldFilter"]["op"] = "GREATER_THAN_OR_EQUAL"
         parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
         
         response = session.post(
@@ -812,9 +815,11 @@ while True:
                     
                     fields = doc.get('fields', {})
                     ts = int(fields.get('timestamp', {}).get('integerValue', 0))
+                    seq = int(fields.get('seq', {}).get('integerValue', -1))
                     
-                    if ts > last_processed_timestamp:
+                    if ts > last_processed_timestamp or (ts == last_processed_timestamp and seq > last_processed_seq):
                         last_processed_timestamp = ts
+                        last_processed_seq = seq
                         
                         if not first_run:
                             event_data = {
@@ -831,7 +836,7 @@ while True:
                 
             first_run = False
         
-        time.sleep(0.2)
+        time.sleep(0.05)
         
     except KeyboardInterrupt:
         break
@@ -859,8 +864,8 @@ while True:
 
     const handleOrientation = (e: DeviceOrientationEvent) => {
       const now = Date.now();
-      // Even slower air mouse (400ms = ~2.5 times per sec)
-      if (now - lastTime < 400) return;
+      // Improved frequency for better UX (150ms)
+      if (now - lastTime < 150) return;
 
       // Use beta (tilt front/back) and gamma (tilt left/right)
       const dx = (e.gamma || 0);
@@ -1321,8 +1326,8 @@ while True:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Throttle mouse moves to 250ms to save quota
-      if (now - lastMouseMoveTime.current > 250) {
+      // Improved frequency for better UX (100ms)
+      if (now - lastMouseMoveTime.current > 100) {
         emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }

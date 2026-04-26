@@ -271,15 +271,17 @@ export default function App() {
     addLog(`Connecting to socket node: ${roomId}`);
     
     const socket = io({
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 50,
       reconnectionDelay: 2000,
+      forceNew: true,
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
       addLog(`Connected via ${socket.io.engine.transport.name}`);
+      console.log('Socket Connected:', socket.id);
       setIsConnected(true);
       setConnectionError(null);
       socket.emit('join-room', roomId);
@@ -326,6 +328,40 @@ export default function App() {
       socketRef.current = null;
     };
   }, [roomId, mode]);
+
+  // REST Polling Fallback for Receiver (Ensures it works even if Socket.io is blocked)
+  useEffect(() => {
+    if (mode !== 'receiver' || !roomId || !isConnected) return;
+    
+    let lastPolledSeq = -1;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/events/${roomId}?since=${Date.now() - 10000}`);
+        if (!response.ok) return;
+        const events = await response.json();
+        
+        events.forEach((event: any) => {
+          if (event.seq > lastPolledSeq) {
+            lastPolledSeq = event.seq;
+            if (event.type === 'mousemove' || event.type === 'mouse-move') {
+              const dx = event.data.dx || 0;
+              const dy = event.data.dy || 0;
+              setMousePos(prev => ({
+                x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+                y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+              }));
+            } else if (event.type === 'click' || event.type === 'mouse-click') {
+              const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+              if (el instanceof HTMLElement) el.click();
+            }
+          }
+        });
+      } catch (e) {}
+    };
+
+    const interval = setInterval(poll, 1500);
+    return () => clearInterval(interval);
+  }, [mode, roomId, isConnected]);
 
   useEffect(() => {
     if (autoCopy && mode === 'receiver') {

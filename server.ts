@@ -25,6 +25,14 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Log all request paths to see if socket.io requests are hitting the server
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/socket.io')) {
+      console.log(`[SOCKET-REQ] ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
   // API for health check (Place before Vite)
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", uptime: process.uptime() });

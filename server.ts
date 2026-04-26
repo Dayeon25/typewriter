@@ -16,13 +16,9 @@ async function startServer() {
     path: '/socket.io/',
     cors: {
       origin: "*",
-      methods: ["GET", "POST"],
-      credentials: false
+      methods: ["GET", "POST"]
     },
-    pingInterval: 10000,
-    pingTimeout: 5000,
-    allowEIO3: true,
-    transports: ['websocket', 'polling']
+    transports: ['polling', 'websocket']
   });
 
   app.use(express.json());

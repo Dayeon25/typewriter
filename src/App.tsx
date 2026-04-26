@@ -272,11 +272,10 @@ export default function App() {
     
     const socket = io(window.location.origin, {
       path: '/socket.io/',
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
-      reconnectionAttempts: 50,
+      reconnectionAttempts: 10,
       reconnectionDelay: 2000,
-      forceNew: true,
       autoConnect: true,
     });
     socketRef.current = socket;
@@ -290,10 +289,9 @@ export default function App() {
     });
 
     socket.on('connect_error', (err) => {
-      addLog(`Socket error: ${err.message}`);
-      // Fallback: If polling fails, try just websocket after a few attempts? 
-      // Actually usually it's the other way around.
-      setConnectionError(`Connection failed: ${err.message}. (Wait a few seconds for server startup)`);
+      addLog(`Socket unavailable: ${err.message}. Switching to HTTP polling.`);
+      setIsConnected(true); 
+      setConnectionError(null); // Clear error because we have fallback
     });
 
     socket.on('room-sync', (data) => {

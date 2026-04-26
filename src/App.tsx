@@ -715,7 +715,7 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.001
+pyautogui.PAUSE = 0.01
 pyautogui.FAILSAFE = True
 
 # Global variables
@@ -784,11 +784,21 @@ def main_loop():
             
             if insert_text:
                 print(f" [+] Typing: {insert_text}")
-                pyperclip.copy(insert_text)
-                if sys.platform == 'darwin':
-                    pyautogui.hotkey('command', 'v')
-                else:
-                    pyautogui.hotkey('ctrl', 'v')
+                try:
+                    # If it's simple English/Numbers, use direct typing for better reliability
+                    # Korean and special chars must use clipboard
+                    if all(ord(c) < 128 for c in insert_text):
+                        pyautogui.write(insert_text)
+                    else:
+                        pyperclip.copy(insert_text)
+                        time.sleep(0.05) # Critical pause for clipboard to sync
+                        if sys.platform == 'darwin':
+                            pyautogui.hotkey('command', 'v')
+                        else:
+                            pyautogui.hotkey('ctrl', 'v')
+                except Exception as e:
+                    print(f"Typing error: {e}")
+                    pyautogui.write(insert_text)
                     
         elif etype == 'command':
             cmd = edata.get('cmd')
@@ -796,12 +806,16 @@ def main_loop():
             elif cmd == 'enter': pyautogui.press('enter')
             elif cmd == 'space': pyautogui.press('space')
             elif cmd == 'clear':
-                pyautogui.hotkey('ctrl', 'a')
+                if sys.platform == 'darwin':
+                    pyautogui.hotkey('command', 'a')
+                else:
+                    pyautogui.hotkey('ctrl', 'a')
                 pyautogui.press('backspace')
                 
         elif etype == 'mouse-move':
             dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            pyautogui.moveRel(dx * 2.5, dy * 2.5)
+            # Higher sensitivity multiplier and use moveRel for explicit relative movement
+            pyautogui.moveRel(int(dx * 1.5), int(dy * 1.5))
             
         elif etype == 'mouse-click':
             btn = edata.get('button', 'left')
@@ -1402,9 +1416,9 @@ if __name__ == "__main__":
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Much faster tracking - 40ms (25 times per second)
-      if (now - lastMouseMoveTime.current > 40) {
-        emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
+      // Even faster tracking - 25ms (40 times per second)
+      if (now - lastMouseMoveTime.current > 25) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 1.5, dy: dy * mouseSensitivity * 1.5 });
         lastMouseMoveTime.current = now;
       }
     }

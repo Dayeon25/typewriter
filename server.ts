@@ -13,6 +13,7 @@ async function startServer() {
   app.set('trust proxy', 1);
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
+    path: '/socket.io/',
     cors: {
       origin: "*",
       methods: ["GET", "POST"],
@@ -20,7 +21,8 @@ async function startServer() {
     },
     pingInterval: 10000,
     pingTimeout: 5000,
-    allowEIO3: true
+    allowEIO3: true,
+    transports: ['websocket', 'polling']
   });
 
   app.use(express.json());

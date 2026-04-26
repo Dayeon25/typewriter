@@ -270,12 +270,14 @@ export default function App() {
     
     addLog(`Connecting to socket node: ${roomId}`);
     
-    const socket = io({
-      transports: ['polling', 'websocket'],
+    const socket = io(window.location.origin, {
+      path: '/socket.io/',
+      transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: 50,
       reconnectionDelay: 2000,
       forceNew: true,
+      autoConnect: true,
     });
     socketRef.current = socket;
 

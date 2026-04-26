@@ -268,19 +268,13 @@ export default function App() {
   useEffect(() => {
     if (!roomId) return;
     
-    // Test API health
-    fetch('/api/health').then(r => r.json()).then(data => addLog(`API check: ${JSON.stringify(data)}`))
-      .catch(e => addLog(`API check failed: ${e.message}`));
-
     addLog(`Connecting to socket node: ${roomId}`);
     
-    // Fast Polling first is much more reliable in proxied environments
     const socket = io({
       transports: ['polling', 'websocket'],
       reconnection: true,
-      reconnectionAttempts: 30,
-      reconnectionDelay: 1000,
-      path: '/socket.io/'
+      reconnectionAttempts: 40,
+      reconnectionDelay: 2000,
     });
     socketRef.current = socket;
 
@@ -293,7 +287,9 @@ export default function App() {
 
     socket.on('connect_error', (err) => {
       addLog(`Socket error: ${err.message}`);
-      setConnectionError(`Connection failed: ${err.message}. Please refresh or check if the server is starting.`);
+      // Fallback: If polling fails, try just websocket after a few attempts? 
+      // Actually usually it's the other way around.
+      setConnectionError(`Connection failed: ${err.message}. (Wait a few seconds for server startup)`);
     });
 
     socket.on('room-sync', (data) => {

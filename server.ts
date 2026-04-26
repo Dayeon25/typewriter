@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', 1);
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
@@ -17,10 +18,17 @@ async function startServer() {
       methods: ["GET", "POST"],
       credentials: true
     },
+    pingInterval: 10000,
+    pingTimeout: 5000,
     allowEIO3: true
   });
 
   app.use(express.json());
+
+  // API for health check (Place before Vite)
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
+  });
 
   // In-memory room state storage
   const roomStates: Record<string, any> = {};
@@ -32,7 +40,7 @@ async function startServer() {
     const { roomId } = req.params;
     const since = parseInt(req.query.since as string) || 0;
     const events = (roomEvents[roomId] || []).filter(e => e.timestamp > since);
-    res.json(events);
+    res.json(events || []);
   });
 
   // REST API to post events (Fallback for web app)
@@ -40,13 +48,14 @@ async function startServer() {
     const { roomId } = req.params;
     const event = req.body;
     
+    if (!roomEvents[roomId]) roomEvents[roomId] = [];
+    
     const newEvent = {
       ...event,
       timestamp: Date.now(),
-      seq: (roomEvents[roomId]?.length || 0)
+      seq: (roomEvents[roomId].length > 0 ? roomEvents[roomId][roomEvents[roomId].length - 1].seq + 1 : 0)
     };
     
-    if (!roomEvents[roomId]) roomEvents[roomId] = [];
     roomEvents[roomId].push(newEvent);
     if (roomEvents[roomId].length > MAX_EVENTS) roomEvents[roomId].shift();
     
@@ -119,12 +128,7 @@ async function startServer() {
   }
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SERVER] Started successfully on port ${PORT}`);
-    console.log(`[SERVER] Listening on all interfaces (0.0.0.0)`);
-  });
-
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    console.log(`[SERVER] Ready on port ${PORT}`);
   });
 }
 

@@ -501,7 +501,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 300); // Buffer to allow composition to stabilize and batch keystrokes to save quota
+    }, 20); // Reduced from 300ms to 20ms for much faster response
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -719,118 +719,131 @@ pyautogui.PAUSE = 0.001
 pyautogui.FAILSAFE = True
 
 # Global variables
-room_id = '${roomId}'
 PROJECT_ID = "gen-lang-client-0554047813"
 DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
 API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
 
-# Get room_id from command line if provided
-if len(sys.argv) > 1:
-    room_id = sys.argv[1]
+def main_loop():
+    print("\\n--------------------------------------------------")
+    print("천지인 리모트 헬퍼 v2.3 (최적화 버전)")
+    print("--------------------------------------------------")
 
-if not room_id:
-    room_id = input("연결할 룸번호를 입력하세요: ").strip().upper()
+    # Get room_id
+    default_room_id = '${roomId}'
+    room_id = ""
 
-if not room_id:
-    print("오류: 룸번호가 필요합니다.")
-    sys.exit(1)
-
-print(f"\\nMonitoring Room: {room_id}")
-print("Starting Cheonjiin Helper (v2.1 - Enhanced Security & Focus)...")
-print("--------------------------------------------------")
-print("1. Click the target window to start typing.")
-print("2. Type on your phone - it will sync automatically.")
-print("3. macOS users: If keyboard doesn't work, allow accessibility permissions for Terminal.")
-print("--------------------------------------------------")
-
-last_processed_timestamp = int(time.time() * 1000)
-last_processed_seq = -1
-session = requests.Session()
-first_run = True
-
-def process_event(event_data):
-    etype = event_data.get('type')
-    edata = event_data.get('data', {})
-    
-    if etype == 'sync-text':
-        delete_count = edata.get('deleteCount', 0)
-        insert_text = edata.get('insertText', '')
-        
-        # 1. Perform deletes
-        if delete_count > 0:
-            print(f" [-] Backspace x{delete_count}")
-            for _ in range(delete_count):
-                pyautogui.press('backspace')
-        
-        # 2. Perform inserts
-        if insert_text:
-            print(f" [+] Typing: {insert_text}")
-            # Use clipboard to ensure Korean assembly is perfect
-            pyperclip.copy(insert_text)
-            if sys.platform == 'darwin':
-                pyautogui.hotkey('command', 'v')
-            else:
-                pyautogui.hotkey('ctrl', 'v')
-                
-    elif etype == 'command':
-        cmd = edata.get('cmd')
-        if cmd == 'backspace': pyautogui.press('backspace')
-        elif cmd == 'enter': pyautogui.press('enter')
-        elif cmd == 'space': pyautogui.press('space')
-        elif cmd == 'clear':
-            pyautogui.hotkey('ctrl', 'a')
-            pyautogui.press('backspace')
+    if len(sys.argv) > 1:
+        room_id = sys.argv[1]
+    else:
+        prompt = f"연결할 룸번호를 입력하세요 (기본: {default_room_id}) [종료: q]: " if default_room_id else "연결할 룸번호를 입력하세요 [종료: q]: "
+        try:
+            print(prompt, end="", flush=True)
+            line = sys.stdin.readline()
+            if not line: return False
+            room_id = line.strip().upper()
+        except EOFError:
+            return False
             
-    elif etype == 'mouse-move':
-        dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-        # Mouse speed multiplier
-        pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
-        
-    elif etype == 'mouse-click':
-        btn = edata.get('button', 'left')
-        pyautogui.click(button=btn)
-
-# Polling Query
-query_body = {
-    "structuredQuery": {
-        "from": [{"collectionId": "events"}],
-        "where": {
-            "fieldFilter": {
-                "field": {"fieldPath": "timestamp"},
-                "op": "GREATER_THAN",
-                "value": {"integerValue": last_processed_timestamp}
-            }
-        },
-        "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
-    }
-}
-
-print("Connected! Waiting for input...")
-
-while True:
-    try:
-        query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
-        # Use GREATER_THAN_OR_EQUAL to catch events with same timestamp but different seq
-        query_body["structuredQuery"]["where"]["fieldFilter"]["op"] = "GREATER_THAN_OR_EQUAL"
-        parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
-        
-        response = session.post(
-            f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
-            json=query_body,
-            timeout=5
-        )
-        
-        if response.status_code == 200:
-            results = response.json()
+        if room_id == 'Q' or room_id == 'EXIT':
+            return False
             
-            if len(results) == 1 and 'document' not in results[0]:
-                pass
-            else:
-                for res in results:
-                    doc = res.get('document')
-                    if not doc: continue
+        if not room_id:
+            room_id = default_room_id
+
+    if not room_id:
+        print("오류: 룸번호가 필요합니다.")
+        time.sleep(1)
+        return True
+
+    print(f"\\nMonitoring Room: {room_id}")
+    print("Starting Cheonjiin Helper (Ultra Responsive)...")
+    print("--------------------------------------------------")
+    print("1. 타겟 창(메모장, 카톡 등)을 클릭해 포커스를 두세요.")
+    print("2. 핸드폰에서 입력하면 이 컴퓨터로 자동 전달됩니다.")
+    print("3. Mac 사용자: 터미널에 손쉬운 사용 권한을 부여해야 합니다.")
+    print("4. CTRL+C를 누르면 룸번호 입력 화면으로 돌아갑니다.")
+    print("--------------------------------------------------")
+
+    last_processed_timestamp = int(time.time() * 1000)
+    last_processed_seq = -1
+    session = requests.Session()
+    first_run = True
+
+    def process_event(event_data):
+        etype = event_data.get('type')
+        edata = event_data.get('data', {})
+        
+        if etype == 'sync-text':
+            delete_count = edata.get('deleteCount', 0)
+            insert_text = edata.get('insertText', '')
+            
+            if delete_count > 0:
+                print(f" [-] Backspace x{delete_count}")
+                for _ in range(delete_count):
+                    pyautogui.press('backspace')
+            
+            if insert_text:
+                print(f" [+] Typing: {insert_text}")
+                pyperclip.copy(insert_text)
+                if sys.platform == 'darwin':
+                    pyautogui.hotkey('command', 'v')
+                else:
+                    pyautogui.hotkey('ctrl', 'v')
                     
-                    fields = doc.get('fields', {})
+        elif etype == 'command':
+            cmd = edata.get('cmd')
+            if cmd == 'backspace': pyautogui.press('backspace')
+            elif cmd == 'enter': pyautogui.press('enter')
+            elif cmd == 'space': pyautogui.press('space')
+            elif cmd == 'clear':
+                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.press('backspace')
+                
+        elif etype == 'mouse-move':
+            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+            pyautogui.moveRel(dx * 2.5, dy * 2.5)
+            
+        elif etype == 'mouse-click':
+            btn = edata.get('button', 'left')
+            pyautogui.click(button=btn)
+
+    # Polling Query Template
+    query_body = {
+        "structuredQuery": {
+            "from": [{"collectionId": "events"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "timestamp"},
+                    "op": "GREATER_THAN_OR_EQUAL",
+                    "value": {"integerValue": last_processed_timestamp}
+                }
+            },
+            "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
+        }
+    }
+
+    print("Connected! Waiting for input...")
+
+    while True:
+        try:
+            query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
+            parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
+            
+            response = session.post(
+                f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
+                json=query_body,
+                timeout=5
+            )
+            
+            processed_anything = False
+            if response.status_code == 200:
+                results = response.json()
+                
+                for res in results:
+                    doc_data = res.get('document')
+                    if not doc_data: continue
+                    
+                    fields = doc_data.get('fields', {})
                     ts = int(fields.get('timestamp', {}).get('integerValue', 0))
                     seq = int(fields.get('seq', {}).get('integerValue', -1))
                     
@@ -845,24 +858,33 @@ while True:
                             }
                             raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
                             for k, v in raw_data.items():
-                                if 'stringValue' in v: event_data['data'][k] = v['stringValue']
-                                elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
-                                elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
+                                val_obj = v
+                                if 'stringValue' in val_obj: event_data['data'][k] = val_obj['stringValue']
+                                elif 'integerValue' in val_obj: event_data['data'][k] = int(val_obj['integerValue'])
+                                elif 'doubleValue' in val_obj: event_data['data'][k] = float(val_obj['doubleValue'])
                             
                             process_event(event_data)
-                
+                            processed_anything = True
+            
             first_run = False
-        
-        # Slower polling to save Firestore free quota
-        # Each query uses 1 read operations. 
-        # 1-sec poll uses ~3600 reads/hour.
-        time.sleep(1.2)
-        
+            time.sleep(0.01 if processed_anything else 0.1)
+            
+        except KeyboardInterrupt:
+            print("\\n방 선택 화면으로 돌아갑니다...")
+            time.sleep(0.5)
+            return True
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(2)
+
+if __name__ == "__main__":
+    try:
+        should_continue = True
+        while should_continue:
+            should_continue = main_loop()
     except KeyboardInterrupt:
-        break
-    except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(2)
+        pass
+    print("Bye!")
 `.trim();
 
   const downloadHelper = () => {
@@ -1380,8 +1402,8 @@ while True:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Even slower mouse moves - 250ms (4 times per second)
-      if (now - lastMouseMoveTime.current > 250) {
+      // Much faster tracking - 40ms (25 times per second)
+      if (now - lastMouseMoveTime.current > 40) {
         emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }

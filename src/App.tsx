@@ -12,10 +12,12 @@ import {
   Info,
   MousePointer2,
   Type,
-  Download
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
+import ReactDOM from 'react-dom';
 import { db } from './firebase';
 import { 
   doc, 
@@ -114,6 +116,12 @@ export default function App() {
   const [autoCopy, setAutoCopy] = useState(false);
   const [lastCopiedText, setLastCopiedText] = useState('');
   const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const [lastSentComposition, setLastSentComposition] = useState<string>('');
+
+  const [lastSentDisplay, setLastSentDisplay] = useState('');
+  const [lastSentTimestamp, setLastSentTimestamp] = useState(0);
+  const [pipWindow, setPipWindow] = useState<any>(null);
 
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
@@ -343,48 +351,86 @@ export default function App() {
   const handleInput = (input: string, isCommand: boolean = false) => {
     setInputState(prev => {
       let { committedText, composition } = prev;
+      let nextCommittedText = committedText;
+      let nextComposition = composition;
 
       if (isCommand) {
         if (input === 'backspace') {
           if (composition.length > 0) {
-            return { ...prev, composition: composition.slice(0, -1) };
+            nextComposition = composition.slice(0, -1);
           } else {
-            return { ...prev, committedText: committedText.slice(0, -1) };
+            nextCommittedText = committedText.slice(0, -1);
           }
         } else if (input === 'clear') {
-          return { committedText: '', composition: [] };
+          nextCommittedText = '';
+          nextComposition = [];
         } else if (input === 'enter') {
           const processed = processCheonjiin(composition);
           const assembled = Hangul.assemble(processed);
-          return {
-            committedText: committedText + (assembled || processed.join('')) + '\n',
-            composition: []
-          };
+          nextCommittedText = committedText + (assembled || processed.join('')) + '\n';
+          nextComposition = [];
         } else if (input === 'space') {
           const processed = processCheonjiin(composition);
           const assembled = Hangul.assemble(processed);
-          return {
-            committedText: committedText + (assembled || processed.join('')) + ' ',
-            composition: []
-          };
+          nextCommittedText = committedText + (assembled || processed.join('')) + ' ';
+          nextComposition = [];
         }
-        return prev;
+      } else {
+        // Handle character input
+        const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(input);
+        if (isKorean) {
+          nextComposition = [...composition, input];
+        } else {
+          const processed = processCheonjiin(composition);
+          const assembled = Hangul.assemble(processed);
+          nextCommittedText = committedText + (assembled || processed.join('')) + input;
+          nextComposition = [];
+        }
       }
 
-      // Handle character input
-      const isKorean = /[ㄱ-ㅎㅏ-ㅣㆍ]/.test(input);
-      if (isKorean) {
-        return { ...prev, composition: [...composition, input] };
-      } else {
-        const processed = processCheonjiin(composition);
-        const assembled = Hangul.assemble(processed);
-        return {
-          committedText: committedText + (assembled || processed.join('')) + input,
-          composition: []
-        };
-      }
+      // Sync to Receiver (Laptop) optimized in a separate useEffect to handle batching and prevent duplication
+      return { committedText: nextCommittedText, composition: nextComposition };
     });
   };
+
+  // Improved sync effect that calculates diff and sends events
+  useEffect(() => {
+    if (mode !== 'sender' || !roomId || !isConnected) return;
+
+    const currentAssembled = Hangul.assemble(processCheonjiin(inputState.composition)) || processCheonjiin(inputState.composition).join('');
+    const currentFullText = inputState.committedText + currentAssembled;
+
+    if (currentFullText === lastSentDisplay) return;
+
+    // Throttle / Debounce the sync to laptop to avoid overwhelming the network and Python script
+    const timeout = setTimeout(() => {
+      const oldText = lastSentDisplay;
+      const newText = currentFullText;
+
+      // Find common prefix
+      let commonLen = 0;
+      const minLen = Math.min(oldText.length, newText.length);
+      while (commonLen < minLen && oldText[commonLen] === newText[commonLen]) {
+        commonLen++;
+      }
+
+      const backspaces = oldText.length - commonLen;
+      const t = Date.now();
+
+      // Batch the events - send a single 'sync' event instead of multiple backspace/keypress
+      // This is MUCH more reliable for the Python helper
+      if (backspaces > 0 || commonLen < newText.length) {
+        emitEvent('sync-text', {
+          deleteCount: backspaces,
+          insertText: newText.substring(commonLen),
+          ts: t
+        });
+        setLastSentDisplay(newText);
+      }
+    }, 50); // Small buffer to allow composition to stabilize
+
+    return () => clearTimeout(timeout);
+  }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
 
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
@@ -442,7 +488,6 @@ export default function App() {
     }
 
     if (keyId === 'backspace') {
-      emitEvent('command', { cmd: 'backspace' });
       handleInput('backspace', true);
       setLastChar(null);
       setTapCount(0);
@@ -450,7 +495,6 @@ export default function App() {
     }
 
     if (keyId === 'enter') {
-      emitEvent('command', { cmd: 'enter' });
       handleInput('enter', true);
       setLastChar(null);
       setTapCount(0);
@@ -458,7 +502,6 @@ export default function App() {
     }
 
     if (keyId === 'space') {
-      emitEvent('command', { cmd: 'space' });
       handleInput('space', true);
       setLastChar(null);
       setTapCount(0);
@@ -466,7 +509,6 @@ export default function App() {
     }
 
     if (inputMode === 'sym') {
-      emitEvent('keypress', { char: keyId });
       handleInput(keyId);
       return;
     }
@@ -478,7 +520,6 @@ export default function App() {
       } else {
         char = char.toLowerCase();
       }
-      emitEvent('keypress', { char });
       handleInput(char);
       if (shiftState === 1) setShiftState(0); 
       return;
@@ -492,12 +533,10 @@ export default function App() {
 
     if (lastChar === keyId && !isVowel && inputMode !== 'num') {
       // Multi-tap
-      emitEvent('command', { cmd: 'backspace' });
       handleInput('backspace', true);
       
       const nextTap = (tapCount + 1) % chars.length;
       setTapCount(nextTap);
-      emitEvent('keypress', { char: chars[nextTap] });
       handleInput(chars[nextTap]);
       
       if (tapTimer.current) clearTimeout(tapTimer.current);
@@ -510,7 +549,6 @@ export default function App() {
       if (tapTimer.current) clearTimeout(tapTimer.current);
       setLastChar(keyId);
       setTapCount(0);
-      emitEvent('keypress', { char: chars[0] });
       handleInput(chars[0]);
       
       if (!isVowel && inputMode !== 'num') {
@@ -580,130 +618,154 @@ export default function App() {
   };
 
   const copyPythonCommand = () => {
-    const cmd = `python -m pip install pyautogui firebase-admin pyperclip; python cheonjiin_helper.py`;
+    const cmd = `python -m pip install pyautogui requests pyperclip; python cheonjiin_helper.py`;
     navigator.clipboard.writeText(cmd).then(() => {
       addLog('Command copied!');
     });
   };
 
   const getPythonScript = () => `
+import sys
 import requests
-import pyautogui
 import time
+import pyautogui
 import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.01
+pyautogui.PAUSE = 0.001
 pyautogui.FAILSAFE = True
 
+# Global variables
 room_id = '${roomId}'
 PROJECT_ID = "gen-lang-client-0554047813"
 DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
 API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
 
-print(f"Monitoring Room: {room_id}")
-print("Starting Cheonjiin Helper (Real-time Polling)...")
+# Get room_id from command line if provided
+if len(sys.argv) > 1:
+    room_id = sys.argv[1]
+else:
+    print(f"Defaulting to Room ID from script: {room_id}")
+
+print(f"\\nMonitoring Room: {room_id}")
+print("Starting Cheonjiin Helper (v2.0 - Stabilized)...")
 print("--------------------------------------------------")
-print("1. Click the window you want to type into.")
-print("2. Use your phone to type or move the mouse.")
+print("1. Click the target window to start typing.")
+print("2. Type on your phone - it will sync automatically.")
 print("--------------------------------------------------")
 
 last_processed_timestamp = int(time.time() * 1000)
+session = requests.Session()
+first_run = True
 
 def process_event(event_data):
-    global last_processed_timestamp
     etype = event_data.get('type')
     edata = event_data.get('data', {})
-    ts = event_data.get('timestamp', 0)
     
-    if ts <= last_processed_timestamp:
-        return
-    last_processed_timestamp = ts
-
-    if etype == 'keypress':
-        char = edata.get('char')
-        if not char: return
-        print(f"Typing: {char}")
-        if ord(char) > 127: # Korean/Special
-            pyperclip.copy(char)
-            pyautogui.hotkey('ctrl', 'v')
-        else:
-            pyautogui.write(char)
+    if etype == 'sync-text':
+        delete_count = edata.get('deleteCount', 0)
+        insert_text = edata.get('insertText', '')
+        
+        # 1. Perform deletes
+        if delete_count > 0:
+            print(f" [-] Backspace x{delete_count}")
+            for _ in range(delete_count):
+                pyautogui.press('backspace')
+        
+        # 2. Perform inserts
+        if insert_text:
+            print(f" [+] Typing: {insert_text}")
+            # Use clipboard to ensure Korean assembly is perfect
+            pyperclip.copy(insert_text)
+            if sys.platform == 'darwin':
+                pyautogui.hotkey('command', 'v')
+            else:
+                pyautogui.hotkey('ctrl', 'v')
+                
     elif etype == 'command':
         cmd = edata.get('cmd')
-        print(f"Command: {cmd}")
         if cmd == 'backspace': pyautogui.press('backspace')
-        elif cmd == 'space': pyautogui.press('space')
         elif cmd == 'enter': pyautogui.press('enter')
+        elif cmd == 'space': pyautogui.press('space')
+        elif cmd == 'clear':
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.press('backspace')
+            
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-        # Move the ACTUAL laptop mouse
-        pyautogui.moveRel(dx, dy)
+        # Mouse speed multiplier
+        pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
+        
     elif etype == 'mouse-click':
         btn = edata.get('button', 'left')
-        print(f"Click: {btn}")
         pyautogui.click(button=btn)
 
-# Polling loop using runQuery for better performance
+# Polling Query
 query_body = {
     "structuredQuery": {
         "from": [{"collectionId": "events"}],
         "where": {
-            "compositeFilter": {
-                "op": "AND",
-                "filters": [
-                    {
-                        "fieldFilter": {
-                            "field": {"fieldPath": "timestamp"},
-                            "op": "GREATER_THAN",
-                            "value": {"integerValue": 0} # Will be updated in loop
-                        }
-                    }
-                ]
+            "fieldFilter": {
+                "field": {"fieldPath": "timestamp"},
+                "op": "GREATER_THAN",
+                "value": {"integerValue": last_processed_timestamp}
             }
         },
         "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
     }
 }
 
+print("Connected! Waiting for input...")
+
 while True:
     try:
-        # Update query with last timestamp to get only NEW events
-        query_body["structuredQuery"]["where"]["compositeFilter"]["filters"][0]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
-        
-        # The events are subcollections of rooms/{room_id}/events
+        query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
         parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
-        response = requests.post(f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", json=query_body)
+        
+        response = session.post(
+            f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
+            json=query_body,
+            timeout=5
+        )
         
         if response.status_code == 200:
             results = response.json()
-            for res in results:
-                doc = res.get('document')
-                if not doc: continue
-                fields = doc.get('fields', {})
+            
+            if len(results) == 1 and 'document' not in results[0]:
+                pass
+            else:
+                for res in results:
+                    doc = res.get('document')
+                    if not doc: continue
+                    
+                    fields = doc.get('fields', {})
+                    ts = int(fields.get('timestamp', {}).get('integerValue', 0))
+                    
+                    if ts > last_processed_timestamp:
+                        last_processed_timestamp = ts
+                        
+                        if not first_run:
+                            event_data = {
+                                "type": fields.get('type', {}).get('stringValue'),
+                                "data": {}
+                            }
+                            raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
+                            for k, v in raw_data.items():
+                                if 'stringValue' in v: event_data['data'][k] = v['stringValue']
+                                elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
+                                elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
+                            
+                            process_event(event_data)
                 
-                # Extract data
-                event_data = {
-                    "type": fields.get('type', {}).get('stringValue'),
-                    "timestamp": int(fields.get('timestamp', {}).get('integerValue', 0)),
-                    "data": {}
-                }
-                
-                raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
-                for k, v in raw_data.items():
-                    if 'stringValue' in v: event_data['data'][k] = v['stringValue']
-                    elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
-                    elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
-                
-                process_event(event_data)
+            first_run = False
         
-        time.sleep(0.1) # Faster polling
+        time.sleep(0.01)
+        
     except KeyboardInterrupt:
         break
     except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(1)
+        time.sleep(0.5)
 `.trim();
 
   const downloadHelper = () => {
@@ -716,6 +778,39 @@ while True:
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  // Air Mouse (Gyroscope) Logic
+  useEffect(() => {
+    if (!isAirMouseActive || activeTab !== 'mouse' || !roomId) return;
+
+    let lastTime = Date.now();
+
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      const now = Date.now();
+      if (now - lastTime < 40) return; // Throttle
+
+      // Use beta (tilt front/back) and gamma (tilt left/right)
+      const dx = (e.gamma || 0);
+      const dy = (e.beta || 0);
+
+      // Simple deadzone and scaling
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 0.5, dy: dy * mouseSensitivity * 0.5 });
+        lastTime = now;
+      }
+    };
+
+    window.addEventListener('deviceorientation', handleOrientation);
+    return () => window.removeEventListener('deviceorientation', handleOrientation);
+  }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
+
+  const isInIframe = () => {
+    try {
+      return window.self !== window.top;
+    } catch (e) {
+      return true;
+    }
   };
 
   if (mode === 'choice') {
@@ -776,6 +871,59 @@ while True:
     );
   }
 
+  const togglePip = async () => {
+    if (isInIframe()) {
+      setIsCompact(true);
+      addLog("PiP mode is only available in a new tab. Opening in 'Mini Mode' instead.");
+      return;
+    }
+
+    if ('documentPictureInPicture' in window) {
+      try {
+        // @ts-ignore
+        const pipWindow = await window.documentPictureInPicture.requestWindow({
+          width: 360,
+          height: 480,
+        });
+
+        const pipDiv = document.createElement('div');
+        pipDiv.id = 'pip-root';
+        pipWindow.document.body.append(pipDiv);
+
+        // Copy styles
+        [...document.styleSheets].forEach((styleSheet) => {
+          try {
+            const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+            const style = document.createElement('style');
+            style.textContent = cssRules;
+            pipWindow.document.head.appendChild(style);
+          } catch (e) {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = (styleSheet as any).href;
+            pipWindow.document.head.appendChild(link);
+          }
+        });
+
+        // Add a class to indicate PiP mode if needed
+        pipWindow.document.body.classList.add('bg-[#E4E3E0]');
+
+        setPipWindow(pipWindow);
+        setIsCompact(true);
+
+        pipWindow.addEventListener('pagehide', () => {
+          setPipWindow(null);
+          setIsCompact(false);
+        });
+      } catch (err) {
+        console.error('PiP failed', err);
+        setIsCompact(true);
+      }
+    } else {
+      setIsCompact(true);
+    }
+  };
+
   if (mode === 'receiver') {
     const getBaseUrl = () => {
       const url = new URL(window.location.href);
@@ -784,60 +932,91 @@ while True:
     const shareUrl = `${getBaseUrl()}?mode=sender&room=${roomId}`;
     const pythonScript = getPythonScript();
 
-    if (isCompact) {
-      return (
-        <div className="fixed bottom-4 right-4 w-80 bg-white border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] z-[10000] flex flex-col overflow-hidden">
-          <div className="bg-[#141414] text-white p-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="text-[10px] font-bold uppercase tracking-widest">Mini Mode</span>
-            </div>
+    // Render Compact UI (for normal floating or PiP)
+    const renderCompactUI = () => (
+      <div className={`${pipWindow ? 'w-full h-full p-4' : 'fixed bottom-4 right-4 w-80 z-[10000] border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'} bg-white flex flex-col overflow-hidden`}>
+        <div className="bg-[#141414] text-white p-2 flex items-center justify-between cursor-move">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{pipWindow ? 'PiP Mode' : 'Mini Mode'}</span>
+          </div>
+          {!pipWindow && (
             <button onClick={() => setIsCompact(false)} className="p-1 hover:bg-white/20 rounded">
               <RefreshCw className="w-3 h-3" />
             </button>
+          )}
+        </div>
+        <div className="p-3 space-y-3 flex-1 flex flex-col">
+          <div className="relative flex-1">
+            <textarea 
+              value={getDisplayText()}
+              readOnly
+              onClick={copyToClipboard}
+              className="w-full h-full min-h-[200px] p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
+              placeholder="Typing..."
+            />
+            <AnimatePresence>
+              {copyFeedback && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 flex items-center justify-center bg-blue-600/90 text-white font-bold rounded pointer-events-none text-center p-2"
+                >
+                  복사됨!<br/>(Ctrl+V)
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <div className="p-3 space-y-3">
-            <div className="relative">
-              <textarea 
-                value={getDisplayText()}
-                readOnly
-                onClick={copyToClipboard}
-                className="w-full h-32 p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
-                placeholder="Typing..."
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={autoCopy} 
+                onChange={(e) => setAutoCopy(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <AnimatePresence>
-                {copyFeedback && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 flex items-center justify-center bg-blue-600/90 text-white font-bold rounded pointer-events-none"
-                  >
-                    복사됨! (Ctrl+V 하세요)
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={autoCopy} 
-                  onChange={(e) => setAutoCopy(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="text-[10px] font-bold uppercase text-gray-500">Auto Copy</span>
-              </label>
-              <button 
-                onClick={copyToClipboard}
-                className="px-3 py-1 bg-[#141414] text-white text-[10px] font-bold uppercase rounded hover:bg-gray-800"
-              >
-                Manual Copy
+              <span className="text-[10px] font-bold uppercase text-gray-500">Auto</span>
+            </label>
+            <button 
+              onClick={copyToClipboard}
+              className="px-3 py-1 bg-[#141414] text-white text-[10px] font-bold uppercase rounded hover:bg-gray-800"
+            >
+              Manual Copy
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+    if (pipWindow) {
+      const pipRoot = pipWindow.document.getElementById('pip-root');
+      return (
+        <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-12">
+          <div className="text-center space-y-4">
+            <motion.div 
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              className="w-20 h-20 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto shadow-xl"
+            >
+              <Monitor className="w-10 h-10" />
+            </motion.div>
+            <h2 className="text-3xl font-bold tracking-tight">화면이 분리되었습니다</h2>
+            <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 창이 떠 있을 거예요!</p>
+            <div className="pt-8">
+              <button onClick={() => pipWindow.close()} className="px-8 py-3 bg-[#141414] text-white rounded-xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center gap-2 mx-auto">
+                <Monitor className="w-5 h-5" />
+                메인 화면으로 합치기
               </button>
             </div>
           </div>
+          {pipRoot && ReactDOM.createPortal(renderCompactUI(), pipRoot)}
         </div>
       );
+    }
+
+    if (isCompact) {
+      return renderCompactUI();
     }
 
     return (
@@ -876,11 +1055,22 @@ while True:
                     <Copy className="w-4 h-4" />
                   </button>
                   <button 
-                    onClick={() => setIsCompact(true)} 
-                    className="px-2 py-1 bg-blue-600 text-white text-[10px] uppercase font-bold hover:bg-blue-700 transition-colors rounded"
+                    onClick={togglePip} 
+                    className="px-2 py-1 bg-blue-600 text-white text-[10px] uppercase font-bold hover:bg-blue-700 transition-colors rounded flex items-center gap-1"
+                    title={isInIframe() ? "새 창에서 열어야 화면 분리(PiP) 기능을 쓸 수 있습니다." : "화면 구석에 작은 창으로 띄우기"}
                   >
-                    미니 모드
+                    <ExternalLink className="w-3 h-3" />
+                    {isInIframe() ? "미니 모드" : "화면 분리 (PiP)"}
                   </button>
+                  {isInIframe() && (
+                    <button 
+                      onClick={() => window.open(window.location.href, '_blank')}
+                      className="px-2 py-1 border border-blue-600 text-blue-600 text-[10px] uppercase font-bold hover:bg-blue-50 transition-colors rounded flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      새 창에서 열기
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="relative">
@@ -953,10 +1143,12 @@ while True:
                 <div className="space-y-4 text-sm text-gray-400 font-serif italic">
                   <p className="text-blue-400 font-bold not-italic">가장 쉬운 방법:</p>
                   <ol className="list-decimal list-inside space-y-2">
+                    <li><a href="https://www.python.org/downloads/" target="_blank" rel="noreferrer" className="underline text-blue-300">Python</a>이 설치되어 있어야 합니다.</li>
                     <li>아래 <b>'도우미 파일 다운로드'</b>를 눌러 파일을 받으세요.</li>
-                    <li>파일이 있는 폴더(예: 다운로드)에서 터미널을 엽니다.</li>
+                    <li>파일이 있는 폴더에서 터미널을 엽니다.</li>
                     <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣으세요.</li>
-                    <li>터미널에서 <code className="text-white bg-white/10 px-1">python cheonjiin_helper.py</code>가 실행되면 끝!</li>
+                    <li>이제 룸번호가 바뀌어도 터미널에서 <b>직접 입력</b>해 연결할 수 있습니다!</li>
+                    <li className="text-xs text-gray-500">팁: 카카오톡 잠금화면 등에서는 숫자 패드를 직접 클릭하거나 핸드폰의 숫자 모드로 입력하세요.</li>
                   </ol>
                   <div className="pt-4">
                     <button 
@@ -1038,8 +1230,8 @@ while True:
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Throttle mouse moves to 30ms for better responsiveness
-      if (now - lastMouseMoveTime.current > 30) {
+      // Throttle mouse moves to 20ms for better responsiveness
+      if (now - lastMouseMoveTime.current > 20) {
         emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }
@@ -1048,32 +1240,6 @@ while True:
   };
 
   // Air Mouse (Gyroscope) Logic
-  useEffect(() => {
-    if (!isAirMouseActive || activeTab !== 'mouse' || !roomId) return;
-
-    let lastX = 0;
-    let lastY = 0;
-    let lastTime = Date.now();
-
-    const handleOrientation = (e: DeviceOrientationEvent) => {
-      const now = Date.now();
-      if (now - lastTime < 40) return; // Throttle
-
-      // Use beta (tilt front/back) and gamma (tilt left/right)
-      const dx = (e.gamma || 0);
-      const dy = (e.beta || 0);
-
-      // Simple deadzone and scaling
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 0.5, dy: dy * mouseSensitivity * 0.5 });
-        lastTime = now;
-      }
-    };
-
-    window.addEventListener('deviceorientation', handleOrientation);
-    return () => window.removeEventListener('deviceorientation', handleOrientation);
-  }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
-
   const handleTouchEnd = () => {
     mouseRef.current = { x: 0, y: 0 };
   };

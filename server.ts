@@ -16,7 +16,7 @@ async function startServer() {
     cors: {
       origin: "*",
       methods: ["GET", "POST"],
-      credentials: true
+      credentials: false
     },
     pingInterval: 10000,
     pingTimeout: 5000,

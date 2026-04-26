@@ -271,15 +271,15 @@ export default function App() {
     addLog(`Connecting to socket node: ${roomId}`);
     
     const socket = io({
-      transports: ['polling', 'websocket'],
+      transports: ['websocket'],
       reconnection: true,
-      reconnectionAttempts: 40,
+      reconnectionAttempts: 50,
       reconnectionDelay: 2000,
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      addLog('Connected to server socket');
+      addLog(`Connected via ${socket.io.engine.transport.name}`);
       setIsConnected(true);
       setConnectionError(null);
       socket.emit('join-room', roomId);
@@ -364,13 +364,8 @@ export default function App() {
   const emitEvent = async (type: string, data: any) => {
     if (!roomId) return;
     
-    // 1. Emit via socket for instant web-to-web sync (no quota cost)
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('remote-event', { roomId, event: { type, data } });
-    }
-    
-    // 2. Also send to REST API for Python helper to poll (no quota cost)
     try {
+      // Send to REST API which handles both storage for Python and broadcasting via Socket.io
       await fetch(`/api/events/${roomId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

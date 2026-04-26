@@ -18,6 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 import ReactDOM from 'react-dom';
+import { io, Socket } from 'socket.io-client';
 import { db } from './firebase';
 import { 
   doc, 
@@ -130,6 +131,7 @@ export default function App() {
   const backspaceInterval = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [hasError, setHasError] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string>('');
@@ -187,20 +189,51 @@ export default function App() {
     isLongPress.current = false;
   };
   
-    // Sender Heartbeat/Keepalive
+  // Sender State Sync via Socket
+  useEffect(() => {
+    if (mode !== 'sender' || !roomId || !isConnected || !socketRef.current) return;
+
+    // Sync input state to receiver via socket
+    socketRef.current.emit('update-room-state', {
+      roomId,
+      state: { inputState }
+    });
+  }, [inputState, mode, roomId, isConnected]);
+
+  // Sync Input to Python via REST fallback if needed
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
-
-    const interval = setInterval(() => {
-      const roomRef = doc(db, 'rooms', roomId);
-      // Only update if tab is focused to save quota
-      if (document.visibilityState === 'visible') {
-        updateDoc(roomRef, { heartbeat: serverTimestamp() }).catch(() => {});
-      }
-    }, 120000); // Pulse every 120s (2 minutes) to save quota
     
-    return () => clearInterval(interval);
-  }, [mode, roomId, isConnected]);
+    // Batch updates to save network
+    const timeout = setTimeout(async () => {
+      const currentComposition = processCheonjiin(inputState.composition);
+      const assembled = (currentComposition.length === 1 && currentComposition[0] === 'ㆍ') 
+        ? 'ㆍ' 
+        : Hangul.assemble(currentComposition);
+      const newDisplay = inputState.committedText + assembled;
+      
+      if (newDisplay !== lastSentDisplay) {
+        let deleteCount = 0;
+        let insertText = '';
+        
+        // Find common prefix length
+        let common = 0;
+        while (common < lastSentDisplay.length && common < newDisplay.length && lastSentDisplay[common] === newDisplay[common]) {
+          common++;
+        }
+        
+        deleteCount = lastSentDisplay.length - common;
+        insertText = newDisplay.substring(common);
+        
+        if (deleteCount > 0 || insertText) {
+          await emitEvent('sync-text', { deleteCount, insertText });
+          setLastSentDisplay(newDisplay);
+        }
+      }
+    }, 20); // Reduced from 300ms to 20ms for much faster response
+
+    return () => clearTimeout(timeout);
+  }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
 
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -231,80 +264,63 @@ export default function App() {
     setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
   };
 
-  // Initialize Firebase Connection Status
+  // Initialize Socket.io Connection (Replaces Firestore status sync)
   useEffect(() => {
     if (!roomId) return;
     
-    addLog(`Connecting to room: ${roomId}`);
+    addLog(`Connecting to socket node: ${roomId}`);
     
-    const roomRef = doc(db, 'rooms', roomId);
-    const eventsRef = collection(roomRef, 'events');
-    
-    let lastProcessedTimestamp = Date.now();
+    const socket = io({
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10
+    });
+    socketRef.current = socket;
 
-    // Listen for room status and state sync
-    const unsubRoom = onSnapshot(roomRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setIsConnected(true);
-        setConnectionError(null);
-        // Sync input state from Sender to Receiver
-        if (mode === 'receiver' && data.inputState) {
-          setInputState(data.inputState);
-        }
-      } else {
-        setIsConnected(false);
+    socket.on('connect', () => {
+      addLog('Connected to server socket');
+      setIsConnected(true);
+      setConnectionError(null);
+      socket.emit('join-room', roomId);
+    });
+
+    socket.on('connect_error', (err) => {
+      addLog(`Socket error: ${err.message}`);
+      setConnectionError('Connection refused. Is the server running?');
+    });
+
+    socket.on('room-sync', (data) => {
+      if (mode === 'receiver' && data.inputState) {
+        setInputState(data.inputState);
       }
     });
 
-    // Listen for events (Receiver logic - Mouse/Clicks only)
-    let unsubEvents = () => {};
-    if (mode === 'receiver') {
-      let lastProcessedSeq = -1;
-      const q = query(
-        eventsRef, 
-        where('timestamp', '>=', lastProcessedTimestamp), 
-        orderBy('timestamp', 'asc'),
-        limit(50)
-      );
-      
-      unsubEvents = onSnapshot(q, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const event = change.doc.data();
-            if (event.timestamp > lastProcessedTimestamp || (event.timestamp === lastProcessedTimestamp && event.seq > lastProcessedSeq)) {
-              lastProcessedTimestamp = event.timestamp;
-              lastProcessedSeq = event.seq;
-              if (event.type === 'mousemove' || event.type === 'mouse-move') {
-                const dx = event.data.dx || 0;
-                const dy = event.data.dy || 0;
-                setMousePos(prev => {
-                  const newPos = {
-                    x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
-                    y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
-                  };
-                  return newPos;
-                });
-              } else if (event.type === 'click' || event.type === 'mouse-click') {
-                const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
-                if (el instanceof HTMLElement) el.click();
-              }
-            }
-          }
-        });
-      }, (err) => {
-        if (err.message.includes('Quota limit exceeded')) {
-          setConnectionError("Firestore quota exceeded. Please try again later (resets daily).");
-        } else {
-          setConnectionError(err.message);
+    socket.on('remote-event', (event) => {
+      if (mode === 'receiver') {
+        if (event.type === 'mousemove' || event.type === 'mouse-move') {
+          const dx = event.data.dx || 0;
+          const dy = event.data.dy || 0;
+          setMousePos(prev => ({
+            x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+            y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+          }));
+        } else if (event.type === 'click' || event.type === 'mouse-click') {
+          const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+          if (el instanceof HTMLElement) el.click();
         }
-        addLog(`Firebase error: ${err.message}`);
-      });
-    }
+      }
+      
+      // If Python client is monitoring, they poll the REST API which bridges these events
+    });
+
+    socket.on('disconnect', () => {
+      setIsConnected(false);
+      addLog('Disconnected from server');
+    });
 
     return () => {
-      unsubRoom();
-      unsubEvents();
+      socket.disconnect();
+      socketRef.current = null;
     };
   }, [roomId, mode]);
 
@@ -344,16 +360,18 @@ export default function App() {
   // Emit Event Helper
   const emitEvent = async (type: string, data: any) => {
     if (!roomId) return;
+    
+    // 1. Emit via socket for instant web-to-web sync (no quota cost)
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('remote-event', { roomId, event: { type, data } });
+    }
+    
+    // 2. Also send to REST API for Python helper to poll (no quota cost)
     try {
-      const roomRef = doc(db, 'rooms', roomId);
-      const eventsRef = collection(roomRef, 'events');
-      
-      // Add event to subcollection
-      await addDoc(eventsRef, {
-        type,
-        data,
-        timestamp: Date.now(),
-        seq: eventSeq.current++
+      await fetch(`/api/events/${roomId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, data })
       });
     } catch (err) {
       console.error('Emit error:', err);
@@ -509,24 +527,7 @@ export default function App() {
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
 
-  // Sync state to Firestore (Sender -> Receiver) - THROTTLED
-  useEffect(() => {
-    if (mode === 'sender' && roomId && isConnected) {
-      const timeout = setTimeout(() => {
-        const roomRef = doc(db, 'rooms', roomId);
-        updateDoc(roomRef, {
-          inputState: inputState,
-          lastUpdate: serverTimestamp()
-        }).catch(err => {
-          if (err.message.includes('Quota limit exceeded')) {
-            setConnectionError("Firestore quota exceeded.");
-          }
-          console.error("Sync error:", err);
-        });
-      }, 500); // Sync full state every 500ms minimum
-      return () => clearTimeout(timeout);
-    }
-  }, [inputState, mode, roomId, isConnected]);
+  // Sync state (Sender -> Receiver) - Handled via Socket.io now
 
   // Link Laptop Mouse to Virtual Cursor (Receiver side)
   useEffect(() => {
@@ -671,17 +672,8 @@ export default function App() {
     setMode('receiver');
     window.history.pushState({}, '', `?mode=receiver&room=${id}`);
     
-    // Create room in Firestore
-    try {
-      await setDoc(doc(db, 'rooms', id), {
-        id,
-        createdAt: serverTimestamp(),
-        lastEvent: null
-      });
-      addLog(`Room created: ${id}`);
-    } catch (err) {
-      console.error('Room creation error:', err);
-    }
+    // No longer need to create in Firestore
+    addLog(`Room created: ${id} (Memory mode)`);
   };
 
   const sendCommand = (cmd: string) => {
@@ -715,17 +707,15 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.01
+pyautogui.PAUSE = 0.005
 pyautogui.FAILSAFE = True
 
 # Global variables
-PROJECT_ID = "gen-lang-client-0554047813"
-DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
-API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
+SERVER_URL = "${window.location.origin}"
 
 def main_loop():
     print("\\n--------------------------------------------------")
-    print("천지인 리모트 헬퍼 v2.3 (최적화 버전)")
+    print("천지인 리모트 헬퍼 v3.0 (할당량 제한 없음)")
     print("--------------------------------------------------")
 
     # Get room_id
@@ -757,10 +747,11 @@ def main_loop():
 
     print(f"\\nMonitoring Room: {room_id}")
     print("Starting Cheonjiin Helper (Ultra Responsive)...")
+    print(f"Connecting to: {SERVER_URL}")
     print("--------------------------------------------------")
     print("1. 타겟 창(메모장, 카톡 등)을 클릭해 포커스를 두세요.")
     print("2. 핸드폰에서 입력하면 이 컴퓨터로 자동 전달됩니다.")
-    print("3. Mac 사용자: 터미널에 손쉬운 사용 권한을 부여해야 합니다.")
+    print("3. 할당량 무제한 버전입니다. 마음껏 사용하세요.")
     print("4. CTRL+C를 누르면 룸번호 입력 화면으로 돌아갑니다.")
     print("--------------------------------------------------")
 
@@ -785,13 +776,11 @@ def main_loop():
             if insert_text:
                 print(f" [+] Typing: {insert_text}")
                 try:
-                    # If it's simple English/Numbers, use direct typing for better reliability
-                    # Korean and special chars must use clipboard
                     if all(ord(c) < 128 for c in insert_text):
                         pyautogui.write(insert_text)
                     else:
                         pyperclip.copy(insert_text)
-                        time.sleep(0.05) # Critical pause for clipboard to sync
+                        time.sleep(0.05)
                         if sys.platform == 'darwin':
                             pyautogui.hotkey('command', 'v')
                         else:
@@ -814,74 +803,41 @@ def main_loop():
                 
         elif etype == 'mouse-move':
             dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            # Higher sensitivity multiplier and use moveRel for explicit relative movement
             pyautogui.moveRel(int(dx * 1.5), int(dy * 1.5))
             
         elif etype == 'mouse-click':
             btn = edata.get('button', 'left')
             pyautogui.click(button=btn)
 
-    # Polling Query Template
-    query_body = {
-        "structuredQuery": {
-            "from": [{"collectionId": "events"}],
-            "where": {
-                "fieldFilter": {
-                    "field": {"fieldPath": "timestamp"},
-                    "op": "GREATER_THAN_OR_EQUAL",
-                    "value": {"integerValue": last_processed_timestamp}
-                }
-            },
-            "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
-        }
-    }
-
     print("Connected! Waiting for input...")
 
     while True:
         try:
-            query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
-            parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
-            
-            response = session.post(
-                f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
-                json=query_body,
+            # Poll Local Express API instead of Firestore
+            response = session.get(
+                f"{SERVER_URL}/api/events/{room_id}?since={last_processed_timestamp}", 
                 timeout=5
             )
             
             processed_anything = False
             if response.status_code == 200:
-                results = response.json()
+                events = response.json()
                 
-                for res in results:
-                    doc_data = res.get('document')
-                    if not doc_data: continue
-                    
-                    fields = doc_data.get('fields', {})
-                    ts = int(fields.get('timestamp', {}).get('integerValue', 0))
-                    seq = int(fields.get('seq', {}).get('integerValue', -1))
+                for event in events:
+                    ts = event.get('timestamp', 0)
+                    seq = event.get('seq', -1)
                     
                     if ts > last_processed_timestamp or (ts == last_processed_timestamp and seq > last_processed_seq):
                         last_processed_timestamp = ts
                         last_processed_seq = seq
                         
                         if not first_run:
-                            event_data = {
-                                "type": fields.get('type', {}).get('stringValue'),
-                                "data": {}
-                            }
-                            raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
-                            for k, v in raw_data.items():
-                                val_obj = v
-                                if 'stringValue' in val_obj: event_data['data'][k] = val_obj['stringValue']
-                                elif 'integerValue' in val_obj: event_data['data'][k] = int(val_obj['integerValue'])
-                                elif 'doubleValue' in val_obj: event_data['data'][k] = float(val_obj['doubleValue'])
-                            
-                            process_event(event_data)
+                            process_event(event)
                             processed_anything = True
             
             first_run = False
-            time.sleep(0.01 if processed_anything else 0.1)
+            # Much faster polling possible without cloud quota worries
+            time.sleep(0.01 if processed_anything else 0.05)
             
         except KeyboardInterrupt:
             print("\\n방 선택 화면으로 돌아갑니다...")
@@ -948,8 +904,8 @@ if __name__ == "__main__":
   };
 
   const quotaBanner = connectionError && connectionError.toLowerCase().includes('quota') ? (
-    <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-[10px] font-bold z-[100000] shadow-lg animate-pulse whitespace-nowrap">
-      ⚠️ FIRESTORE 무료 할당량 초과: 연결이 일시적으로 중단되었습니다. (내일 초기화)
+    <div className="fixed top-0 left-0 right-0 bg-[#141414] text-white p-2 text-center text-[10px] font-bold z-[100000] shadow-lg whitespace-nowrap">
+      🚀 FIRESTORE 할당량 초과: 무제한 실시간 서버(Socket.io)로 자동 전환되었습니다.
     </div>
   ) : null;
 

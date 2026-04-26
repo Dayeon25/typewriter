@@ -20,6 +20,40 @@ async function startServer() {
     allowEIO3: true
   });
 
+  app.use(express.json());
+
+  // In-memory room state storage
+  const roomStates: Record<string, any> = {};
+  const roomEvents: Record<string, any[]> = {};
+  const MAX_EVENTS = 50;
+
+  // REST API for Python helper to poll
+  app.get("/api/events/:roomId", (req, res) => {
+    const { roomId } = req.params;
+    const since = parseInt(req.query.since as string) || 0;
+    const events = (roomEvents[roomId] || []).filter(e => e.timestamp > since);
+    res.json(events);
+  });
+
+  // REST API to post events (Fallback for web app)
+  app.post("/api/events/:roomId", (req, res) => {
+    const { roomId } = req.params;
+    const event = req.body;
+    
+    const newEvent = {
+      ...event,
+      timestamp: Date.now(),
+      seq: (roomEvents[roomId]?.length || 0)
+    };
+    
+    if (!roomEvents[roomId]) roomEvents[roomId] = [];
+    roomEvents[roomId].push(newEvent);
+    if (roomEvents[roomId].length > MAX_EVENTS) roomEvents[roomId].shift();
+    
+    io.to(roomId).emit("remote-event", newEvent);
+    res.json({ success: true, timestamp: newEvent.timestamp });
+  });
+
   const PORT = 3000;
 
   // Socket.io logic
@@ -29,24 +63,30 @@ async function startServer() {
     socket.on("join-room", (roomId) => {
       socket.join(roomId);
       console.log(`User ${socket.id} joined room ${roomId}`);
+      
+      // Send current state to joining user
+      if (roomStates[roomId]) {
+        socket.emit("room-sync", roomStates[roomId]);
+      }
     });
 
-    socket.on("keypress", ({ roomId, char }) => {
-      console.log(`Keypress in room ${roomId}: ${char}`);
-      socket.to(roomId).emit("remote-keypress", char);
+    socket.on("update-room-state", ({ roomId, state }) => {
+      roomStates[roomId] = { ...roomStates[roomId], ...state };
+      socket.to(roomId).emit("room-sync", roomStates[roomId]);
     });
 
-    socket.on("command", ({ roomId, cmd }) => {
-      console.log(`Command in room ${roomId}: ${cmd}`);
-      socket.to(roomId).emit("remote-command", cmd);
-    });
+    socket.on("remote-event", ({ roomId, event }) => {
+      const newEvent = {
+        ...event,
+        timestamp: Date.now(),
+        seq: (roomEvents[roomId]?.length || 0)
+      };
+      
+      if (!roomEvents[roomId]) roomEvents[roomId] = [];
+      roomEvents[roomId].push(newEvent);
+      if (roomEvents[roomId].length > MAX_EVENTS) roomEvents[roomId].shift();
 
-    socket.on("mouse-move", ({ roomId, dx, dy }) => {
-      socket.to(roomId).emit("remote-mouse-move", { dx, dy });
-    });
-
-    socket.on("mouse-click", ({ roomId, button }) => {
-      socket.to(roomId).emit("remote-mouse-click", { button });
+      socket.to(roomId).emit("remote-event", newEvent);
     });
 
     socket.on("disconnect", () => {

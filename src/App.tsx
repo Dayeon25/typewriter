@@ -318,13 +318,12 @@ export default function App() {
         } else if (event.type === 'click' || event.type === 'mouse-click') {
           const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
           if (el instanceof HTMLElement) el.click();
-        } else if (event.type === 'sync-text') {
-          const { deleteCount, insertText } = event.data;
-          setInputState(prev => ({
-            ...prev,
-            committedText: (prev.committedText || '').slice(0, -(deleteCount || 0)) + (insertText || ''),
-            composition: [] // sync-text usually commits composition
-          }));
+        } else if (event.type === 'sync-state') {
+          const { committedText, composition } = event.data;
+          setInputState({
+            committedText: committedText || '',
+            composition: composition || []
+          });
         }
       }
       
@@ -366,13 +365,12 @@ export default function App() {
             } else if (event.type === 'click' || event.type === 'mouse-click') {
               const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
               if (el instanceof HTMLElement) el.click();
-            } else if (event.type === 'sync-text') {
-              const { deleteCount, insertText } = event.data;
-              setInputState(prev => ({
-                ...prev,
-                committedText: (prev.committedText || '').slice(0, -(deleteCount || 0)) + (insertText || ''),
-                composition: []
-              }));
+            } else if (event.type === 'sync-state') {
+              const { committedText, composition } = event.data;
+              setInputState({
+                committedText: committedText || '',
+                composition: composition || []
+              });
             }
           }
         });
@@ -548,32 +546,17 @@ export default function App() {
 
     if (currentFullText === lastSentDisplay) return;
 
-    // Throttle / Debounce the sync to laptop to avoid overwhelming the network and Python script
+    const t = Date.now();
+    
+    // Send ABSOLUTE state for maximum reliability on flaky connections like Vercel
     const timeout = setTimeout(() => {
-      const oldText = lastSentDisplay;
-      const newText = currentFullText;
-
-      // Find common prefix
-      let commonLen = 0;
-      const minLen = Math.min(oldText.length, newText.length);
-      while (commonLen < minLen && oldText[commonLen] === newText[commonLen]) {
-        commonLen++;
-      }
-
-      const backspaces = oldText.length - commonLen;
-      const t = Date.now();
-
-      // Batch the events - send a single 'sync' event instead of multiple backspace/keypress
-      // This is MUCH more reliable for the Python helper
-      if (backspaces > 0 || commonLen < newText.length) {
-        emitEvent('sync-text', {
-          deleteCount: backspaces,
-          insertText: newText.substring(commonLen),
-          ts: t
-        });
-        setLastSentDisplay(newText);
-      }
-    }, 20); // Reduced from 300ms to 20ms for much faster response
+      emitEvent('sync-state', {
+        committedText: inputState.committedText,
+        composition: inputState.composition,
+        ts: t
+      });
+      setLastSentDisplay(currentFullText);
+    }, 50); 
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -1530,7 +1513,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-6 shrink-0">
+            <div className="bg-black p-1 pb-16 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

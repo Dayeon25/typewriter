@@ -120,6 +120,7 @@ export default function App() {
   const [lastSentComposition, setLastSentComposition] = useState<string>('');
 
   const [lastSentDisplay, setLastSentDisplay] = useState('');
+  const lastQueuedText = useRef('');
   const [lastSentTimestamp, setLastSentTimestamp] = useState(0);
 
   const [lastChar, setLastChar] = useState<string | null>(null);
@@ -134,8 +135,7 @@ export default function App() {
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
   const [pipWindow, setPipWindow] = useState<any>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(380); // Default keyboard height
-  const [isResizing, setIsResizing] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -230,31 +230,6 @@ export default function App() {
     };
   }, [roomId, mode]);
 
-  // Resize handling
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMove = (e: MouseEvent | TouchEvent) => {
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      const newHeight = window.innerHeight - clientY;
-      // Limit height: minimum 250px, maximum 80% of screen
-      setKeyboardHeight(Math.max(250, Math.min(window.innerHeight * 0.8, newHeight)));
-    };
-
-    const handleUp = () => setIsResizing(false);
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove);
-    window.addEventListener('touchend', handleUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-      window.removeEventListener('touchmove', handleMove);
-      window.removeEventListener('touchend', handleUp);
-    };
-  }, [isResizing]);
   useEffect(() => {
     if (autoCopy && mode === 'receiver') {
       const text = getDisplayText();
@@ -422,19 +397,22 @@ export default function App() {
   };
 
   // Improved sync effect that calculates diff and sends events
-  const isSyncing = useRef(false);
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
 
     const currentAssembled = Hangul.assemble(processCheonjiin(inputState.composition)) || processCheonjiin(inputState.composition).join('');
     const currentFullText = inputState.committedText + currentAssembled;
 
-    if (currentFullText === lastSentDisplay || isSyncing.current) return;
+    if (currentFullText === lastQueuedText.current) return;
 
-    // Throttle / Debounce the sync to laptop
-    const timeout = setTimeout(async () => {
-      const oldText = lastSentDisplay;
-      const newText = currentFullText;
+    // Cache current text to prevent duplicate triggers during debounce
+    const targetText = currentFullText;
+
+    const timeout = setTimeout(() => {
+      const oldText = lastQueuedText.current;
+      const newText = targetText;
+
+      if (oldText === newText) return;
 
       // Find common prefix
       let commonLen = 0;
@@ -447,22 +425,18 @@ export default function App() {
       const t = Date.now();
 
       if (backspaces > 0 || commonLen < newText.length) {
-        isSyncing.current = true;
-        try {
-          await emitEvent('sync-text', {
-            deleteCount: backspaces,
-            insertText: newText.substring(commonLen),
-            ts: t
-          });
-          setLastSentDisplay(newText);
-        } finally {
-          isSyncing.current = false;
-        }
+        lastQueuedText.current = newText;
+        emitEvent('sync-text', {
+          deleteCount: backspaces,
+          insertText: newText.substring(commonLen),
+          ts: t
+        });
+        setLastSentDisplay(newText);
       }
-    }, 100); // Slightly increased buffer
+    }, 40); 
 
     return () => clearTimeout(timeout);
-  }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
+  }, [inputState, mode, roomId, isConnected]);
 
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
@@ -644,16 +618,20 @@ export default function App() {
   const startBackspace = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e) {
       if ('touches' in e) {
-        // Prevent mouse events from firing after touch
         if (e.cancelable) e.preventDefault();
       }
     }
     if (backspaceInterval.current) return;
-    handleKeyClick('backspace');
-    // Slightly slower repeat for better control and reliability
+    
+    // Immediate initial backspace
+    handleInput('backspace', true);
+    setLastChar(null);
+    setTapCount(0);
+    
+    // repeat after delay
     backspaceInterval.current = setInterval(() => {
-      handleKeyClick('backspace');
-    }, 150);
+      handleInput('backspace', true);
+    }, 180); // Slightly slower for better control
   };
 
   const stopBackspace = () => {
@@ -663,26 +641,7 @@ export default function App() {
     }
   };
 
-  const lastEventTime = useRef(0);
-  const isTouchDevice = useRef(false);
-
-  const handleKeyPressStart = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    // Detect touch device and ignore mouse events if touch was recently triggered
-    if (e && 'touches' in e) {
-      isTouchDevice.current = true;
-    } else if (isTouchDevice.current && (!e || !('touches' in e))) {
-      // If we've seen touch events recently, ignore mouse events for a while
-      const now = Date.now();
-      if (now - lastEventTime.current < 500) return;
-    }
-
-    const now = Date.now();
-    lastEventTime.current = now;
-
-    if (e && 'touches' in e && e.cancelable) {
-      e.preventDefault();
-    }
-
+  const handleKeyPressStart = (keyId: string) => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     
     // Set a timer for long press (600ms)
@@ -692,13 +651,7 @@ export default function App() {
     }, 600);
   };
 
-  const handleKeyPressEnd = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    // Prevent double processing on end (simulated mouse events)
-    if (e && !('touches' in e) && isTouchDevice.current) {
-      const now = Date.now();
-      if (now - lastEventTime.current < 500) return;
-    }
-
+  const handleKeyPressEnd = (keyId: string, wasLongPress: boolean = false) => {
     if (longPressTimer.current) {
       // It was a short click
       clearTimeout(longPressTimer.current);
@@ -777,32 +730,29 @@ def process_event(event_data):
         if delete_count > 0:
             print(f" [-] Backspace x{delete_count}")
             for _ in range(delete_count):
-                pyautogui.press('backspace')
+                pyautogui.press('backspace', _pause=False)
+            time.sleep(0.01)
         
         # 2. Perform inserts
         if insert_text:
             print(f" [+] Typing: {insert_text}")
             # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
-            time.sleep(0.05) # Increased delay for clipboard stability across apps
+            time.sleep(0.02) # Delay for clipboard stability
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.02) # Extra small delay for OS processing
+            time.sleep(0.01)
                 
     elif etype == 'command':
         cmd = edata.get('cmd')
-        if cmd == 'backspace': 
-            pyautogui.press('backspace')
-        elif cmd == 'enter': 
-            pyautogui.press('enter')
-        elif cmd == 'space': 
-            pyautogui.press('space')
+        if cmd == 'backspace': pyautogui.press('backspace', _pause=False)
+        elif cmd == 'enter': pyautogui.press('enter')
+        elif cmd == 'space': pyautogui.press('space')
         elif cmd == 'clear':
             if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
             else: pyautogui.hotkey('ctrl', 'a')
-            time.sleep(0.05)
             pyautogui.press('backspace')
             
     elif etype == 'mouse-move':
@@ -879,42 +829,22 @@ def run_helper(room_id):
 
 if __name__ == "__main__":
     print("--------------------------------------------------")
-    print("천지인 리모트 데스크탑 도우미 (v2.2 - Stabilized)")
+    print("천지인 리모트 데스크탑 도우미 (v2.1 - Enhanced)")
     print("--------------------------------------------------")
     
     current_room = '${roomId}' if '${roomId}' else None
     
     while True:
-        if current_room:
-            print(f"\\n[*] 현재 설정된 룸 코드: {current_room}")
-            print("[1] 이 코드로 즉시 시작")
-            print("[2] 다른 룸 코드 입력")
-            print("[3] 프로그램 종료")
-            choice = input("\\n[?] 선택하세요 (기본값: 1): ").strip()
-            
-            if choice == '2':
-                current_room = None
-            elif choice == '3':
-                break
-            else:
-                pass
-        
         if not current_room:
-            current_room = input("\\n[?] 연결할 룸 코드를 입력하세요 (6자리): ").strip().upper()
+            current_room = input("\\n[?] 연결할 룸 코드를 입력하세요 (예: ABCDEF): ").strip().upper()
         
         if not current_room: continue
-        if current_room.lower() == 'exit': break
         
-        try:
-            success = run_helper(current_room)
-            if success: # Manual stop via KeyboardInterrupt
-                print("\\n[!] 작업을 중단합니다.")
-                current_room = None
-                continue
-        except Exception as e:
-            print(f"\\n[!] 오류 발생: {e}")
-            time.sleep(2)
+        success = run_helper(current_room)
+        if success: # Manual stop
+            break
         
+        # Room not found or error, ask for new code
         current_room = None
 `.trim();
 
@@ -1492,7 +1422,31 @@ if __name__ == "__main__":
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Preview */}
-              <div className="flex-1 flex flex-col p-4 bg-white/50 overflow-hidden">
+              <div className="flex-1 flex flex-col p-4 bg-white/50 overflow-hidden relative">
+                <div className="absolute top-2 right-2 flex flex-col gap-1 z-10 items-center">
+                  <span className="text-[8px] font-bold text-gray-400 rotate-0">HEIGHT</span>
+                  <button 
+                    onClick={() => setKeyboardOffset(prev => Math.max(prev - 20, -200))}
+                    className="w-8 h-8 bg-black/5 text-gray-400 rounded-full flex items-center justify-center active:bg-black/10"
+                    title="Keyboard Up"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2"><path d="m18 15-6-6-6 6"/></svg>
+                  </button>
+                  <button 
+                    onClick={() => setKeyboardOffset(prev => Math.min(prev + 20, 200))}
+                    className="w-8 h-8 bg-black/5 text-gray-400 rounded-full flex items-center justify-center active:bg-black/10"
+                    title="Keyboard Down"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-current stroke-2"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <button 
+                    onClick={() => setKeyboardOffset(0)}
+                    className="w-8 h-8 bg-black/5 text-[8px] font-bold text-gray-400 rounded-full flex items-center justify-center active:bg-black/10"
+                  >
+                    RESET
+                  </button>
+                </div>
+
                 <div className="flex-1 flex items-center justify-center overflow-y-auto">
                   <div className="text-center w-full">
                     <div className="text-3xl font-medium text-gray-800 break-all px-4">
@@ -1505,20 +1459,11 @@ if __name__ == "__main__":
                 </div>
               </div>
 
-            {/* Keypad Container */}
+            {/* Galaxy Style Keyboard - Dark Theme */}
             <div 
-              className="bg-black p-1 pb-6 shrink-0 relative flex flex-col"
-              style={{ height: `${keyboardHeight}px` }}
+              className="bg-black p-1 pb-6 shrink-0 transition-transform duration-200 ease-out"
+              style={{ transform: `translateY(${keyboardOffset}px)` }}
             >
-              {/* Resize Handle */}
-              <div 
-                className="absolute -top-3 left-0 right-0 h-6 flex items-center justify-center cursor-ns-resize z-50 touch-none"
-                onMouseDown={() => setIsResizing(true)}
-                onTouchStart={() => setIsResizing(true)}
-              >
-                <div className="w-12 h-1.5 bg-white/30 rounded-full shadow-lg"></div>
-              </div>
-
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
@@ -1580,12 +1525,12 @@ if __name__ == "__main__":
                         return (
                           <button
                             key={keyIndex}
-                            onMouseDown={(e) => handleKeyPressStart(key, e)}
-                            onMouseUp={(e) => handleKeyPressEnd(key, e)}
-                            onMouseLeave={(e) => handleKeyPressEnd(key, e)}
-                            onTouchStart={(e) => handleKeyPressStart(key, e)}
-                            onTouchEnd={(e) => handleKeyPressEnd(key, e)}
-                            className={`flex-1 h-12 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C] shadow-sm`}
+                            onMouseDown={() => handleKeyPressStart(key)}
+                            onMouseUp={() => handleKeyPressEnd(key)}
+                            onMouseLeave={() => handleKeyPressEnd(key, true)}
+                            onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key); }}
+                            onTouchEnd={() => handleKeyPressEnd(key)}
+                            className={`flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]`}
                           >
                             {key}
                           </button>
@@ -1687,11 +1632,9 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
                       <button
                         key={key.id}
-                        onMouseDown={() => handleKeyPressStart(key.id)}
-                        onMouseUp={() => handleKeyPressEnd(key.id)}
-                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
-                        onTouchEnd={() => handleKeyPressEnd(key.id)}
+                        onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
+                        onPointerUp={() => handleKeyPressEnd(key.id)}
+                        onPointerLeave={() => handleKeyPressEnd(key.id, true)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1699,11 +1642,9 @@ if __name__ == "__main__":
                       </button>
                     ))}
                     <button 
-                      onMouseDown={(e) => startBackspace(e)}
-                      onMouseUp={stopBackspace}
-                      onMouseLeave={stopBackspace}
-                      onTouchStart={(e) => startBackspace(e)}
-                      onTouchEnd={stopBackspace}
+                      onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
+                      onPointerUp={stopBackspace}
+                      onPointerLeave={stopBackspace}
                       className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
                     >
                       <Delete className="w-6 h-6 text-white" />
@@ -1715,11 +1656,9 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
                       <button
                         key={key.id}
-                        onMouseDown={() => handleKeyPressStart(key.id)}
-                        onMouseUp={() => handleKeyPressEnd(key.id)}
-                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
-                        onTouchEnd={() => handleKeyPressEnd(key.id)}
+                        onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
+                        onPointerUp={() => handleKeyPressEnd(key.id)}
+                        onPointerLeave={() => handleKeyPressEnd(key.id, true)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1727,7 +1666,7 @@ if __name__ == "__main__":
                       </button>
                     ))}
                     <button 
-                      onClick={() => handleKeyClick('enter')}
+                      onPointerDown={() => handleKeyClick('enter')}
                       className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
                     >
                       <CornerDownLeft className="w-6 h-6 text-white" />
@@ -1739,11 +1678,9 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
                       <button
                         key={key.id}
-                        onMouseDown={() => handleKeyPressStart(key.id)}
-                        onMouseUp={() => handleKeyPressEnd(key.id)}
-                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
-                        onTouchEnd={() => handleKeyPressEnd(key.id)}
+                        onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
+                        onPointerUp={() => handleKeyPressEnd(key.id)}
+                        onPointerLeave={() => handleKeyPressEnd(key.id, true)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1751,7 +1688,7 @@ if __name__ == "__main__":
                       </button>
                     ))}
                     <button 
-                      onClick={() => handleKeyClick('punct')}
+                      onPointerDown={() => handleKeyClick('punct')}
                       className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all text-xl font-bold text-white"
                     >
                       .,?!
@@ -1762,13 +1699,13 @@ if __name__ == "__main__":
                   <div className="grid grid-cols-4 gap-1.5 h-16">
                     <div className="flex gap-1">
                       <button 
-                        onClick={() => setInputMode('sym')}
+                        onPointerDown={() => setInputMode('sym')}
                         className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
                       >
                         !#1
                       </button>
                       <button 
-                        onClick={() => handleKeyClick('mode')}
+                        onPointerDown={() => handleKeyClick('mode')}
                         className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95 leading-tight"
                       >
                         <span>한</span>
@@ -1777,24 +1714,22 @@ if __name__ == "__main__":
                       </button>
                     </div>
                     <button 
-                      onMouseDown={() => handleKeyPressStart('0')}
-                      onMouseUp={() => handleKeyPressEnd('0')}
-                      onMouseLeave={() => handleKeyPressEnd('0', true)}
-                      onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart('0'); }}
-                      onTouchEnd={() => handleKeyPressEnd('0')}
+                      onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart('0'); }}
+                      onPointerUp={() => handleKeyPressEnd('0')}
+                      onPointerLeave={() => handleKeyPressEnd('0', true)}
                       className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>
                       <span className="text-xl font-bold text-white">ㅇㅁ</span>
                     </button>
                     <button 
-                      onClick={() => handleKeyClick('space')}
+                      onPointerDown={() => handleKeyClick('space')}
                       className="bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all"
                     >
                       <div className="w-10 h-1 bg-white/20 rounded-full"></div>
                     </button>
                     <button 
-                      onClick={() => sendCommand('clear')}
+                      onPointerDown={() => sendCommand('clear')}
                       className="bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
                     >
                       한자

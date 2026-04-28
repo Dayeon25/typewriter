@@ -189,15 +189,33 @@ export default function App() {
     isLongPress.current = false;
   };
   
-  // Sender State Sync via Socket
+  // Sync Input State to Server (Sender -> Server)
   useEffect(() => {
-    if (mode !== 'sender' || !roomId || !isConnected || !socketRef.current) return;
+    if (mode !== 'sender' || !roomId || !isConnected) return;
+    
+    const syncState = async () => {
+      // 1. Try Socket.io if connected
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('update-room-state', {
+          roomId,
+          state: { inputState }
+        });
+      }
+      
+      // 2. Always backup via REST for robustness, especially if socket is unstable
+      try {
+        await fetch(`/api/state/${roomId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: { inputState } })
+        });
+      } catch (e) {
+        console.error("State sync error", e);
+      }
+    };
 
-    // Sync input state to receiver via socket
-    socketRef.current.emit('update-room-state', {
-      roomId,
-      state: { inputState }
-    });
+    const timeout = setTimeout(syncState, 500); // Throttled sync
+    return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected]);
 
   // Sync State Sync via Socket is handled below in global effects
@@ -349,7 +367,7 @@ export default function App() {
     });
 
     socket.on('connect_error', (err) => {
-      console.warn(`Socket unavailable: ${err.message}. Switching to HTTP polling.`);
+      // Silently handle socket errors and use polling
       setIsConnected(true); 
       setConnectionError(null); 
     });
@@ -383,20 +401,32 @@ export default function App() {
     let lastPolledSeq = -1;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/events/${roomId}?since=${Date.now() - 10000}`);
-        if (!response.ok) return;
-        const events = await response.json();
-        
-        events.forEach((event: any) => {
-          if (event.seq > lastPolledSeq) {
-            lastPolledSeq = event.seq;
-            processEvent(event);
+        // Poll for events (for Python-like incremental sync or any side effects)
+        const eventResp = await fetch(`/api/events/${roomId}?since=${Date.now() - 5000}`);
+        if (eventResp.ok) {
+          const events = await eventResp.json();
+          events.forEach((event: any) => {
+            if (event.seq > lastPolledSeq) {
+              lastPolledSeq = event.seq;
+              processEvent(event);
+            }
+          });
+        }
+
+        // Poll for full state (to ensure web laptop view is always in sync)
+        if (!socketRef.current?.connected) {
+          const stateResp = await fetch(`/api/state/${roomId}`);
+          if (stateResp.ok) {
+            const data = await stateResp.json();
+            if (data.inputState) {
+              setInputState(data.inputState);
+            }
           }
-        });
+        }
       } catch (e) {}
     };
 
-    const interval = setInterval(poll, 800);
+    const interval = setInterval(poll, 1000);
     return () => clearInterval(interval);
   }, [mode, roomId, isConnected, processEvent]);
 
@@ -1486,7 +1516,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-20 shrink-0">
+            <div className="bg-black p-1 pb-28 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

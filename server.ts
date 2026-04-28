@@ -41,6 +41,21 @@ async function startServer() {
   const roomEvents: Record<string, any[]> = {};
   const MAX_EVENTS = 50;
 
+  // REST API to get room state
+  app.get("/api/state/:roomId", (req, res) => {
+    const { roomId } = req.params;
+    res.json(roomStates[roomId] || {});
+  });
+
+  // REST API to update room state
+  app.post("/api/state/:roomId", (req, res) => {
+    const { roomId } = req.params;
+    const { state } = req.body;
+    roomStates[roomId] = { ...roomStates[roomId], ...state };
+    io.to(roomId).emit("room-sync", roomStates[roomId]);
+    res.json({ success: true });
+  });
+
   // REST API for Python helper to poll
   app.get("/api/events/:roomId", (req, res) => {
     const { roomId } = req.params;

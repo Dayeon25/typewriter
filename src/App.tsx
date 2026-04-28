@@ -433,7 +433,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 20); 
+    }, 40); 
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected]);
@@ -631,7 +631,7 @@ export default function App() {
     // repeat after delay
     backspaceInterval.current = setInterval(() => {
       handleInput('backspace', true);
-    }, 150); // Faster repeat for better feel
+    }, 180); // Slightly slower for better control
   };
 
   const stopBackspace = () => {
@@ -710,7 +710,7 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.005
+pyautogui.PAUSE = 0.01
 pyautogui.FAILSAFE = True
 
 # Global variables
@@ -731,19 +731,19 @@ def process_event(event_data):
             print(f" [-] Backspace x{delete_count}")
             for _ in range(delete_count):
                 pyautogui.press('backspace', _pause=False)
-            time.sleep(0.005)
+            time.sleep(0.01)
         
         # 2. Perform inserts
         if insert_text:
             print(f" [+] Typing: {insert_text}")
             # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
-            time.sleep(0.01) # Faster clipboard delay
+            time.sleep(0.02) # Delay for clipboard stability
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.005)
+            time.sleep(0.01)
                 
     elif etype == 'command':
         cmd = edata.get('cmd')

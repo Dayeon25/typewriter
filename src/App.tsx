@@ -134,9 +134,8 @@ export default function App() {
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
   const [pipWindow, setPipWindow] = useState<any>(null);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(380); // Default keyboard height
-  const isTouching = useRef(false);
+  const [isResizing, setIsResizing] = useState(false);
   
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -231,6 +230,31 @@ export default function App() {
     };
   }, [roomId, mode]);
 
+  // Resize handling
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      const newHeight = window.innerHeight - clientY;
+      // Limit height: minimum 250px, maximum 80% of screen
+      setKeyboardHeight(Math.max(250, Math.min(window.innerHeight * 0.8, newHeight)));
+    };
+
+    const handleUp = () => setIsResizing(false);
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleMove);
+    window.addEventListener('touchend', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleUp);
+    };
+  }, [isResizing]);
   useEffect(() => {
     if (autoCopy && mode === 'receiver') {
       const text = getDisplayText();
@@ -398,16 +422,17 @@ export default function App() {
   };
 
   // Improved sync effect that calculates diff and sends events
+  const isSyncing = useRef(false);
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
 
     const currentAssembled = Hangul.assemble(processCheonjiin(inputState.composition)) || processCheonjiin(inputState.composition).join('');
     const currentFullText = inputState.committedText + currentAssembled;
 
-    if (currentFullText === lastSentDisplay) return;
+    if (currentFullText === lastSentDisplay || isSyncing.current) return;
 
-    // Throttle / Debounce the sync to laptop to avoid overwhelming the network and Python script
-    const timeout = setTimeout(() => {
+    // Throttle / Debounce the sync to laptop
+    const timeout = setTimeout(async () => {
       const oldText = lastSentDisplay;
       const newText = currentFullText;
 
@@ -421,17 +446,20 @@ export default function App() {
       const backspaces = oldText.length - commonLen;
       const t = Date.now();
 
-      // Batch the events - send a single 'sync' event instead of multiple backspace/keypress
-      // This is MUCH more reliable for the Python helper
       if (backspaces > 0 || commonLen < newText.length) {
-        emitEvent('sync-text', {
-          deleteCount: backspaces,
-          insertText: newText.substring(commonLen),
-          ts: t
-        });
-        setLastSentDisplay(newText);
+        isSyncing.current = true;
+        try {
+          await emitEvent('sync-text', {
+            deleteCount: backspaces,
+            insertText: newText.substring(commonLen),
+            ts: t
+          });
+          setLastSentDisplay(newText);
+        } finally {
+          isSyncing.current = false;
+        }
       }
-    }, 50); // Small buffer to allow composition to stabilize
+    }, 100); // Slightly increased buffer
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -635,14 +663,24 @@ export default function App() {
     }
   };
 
+  const lastEventTime = useRef(0);
+  const isTouchDevice = useRef(false);
+
   const handleKeyPressStart = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    // Prevent mouse emulation on touch devices to stop double-typing
+    // Detect touch device and ignore mouse events if touch was recently triggered
     if (e && 'touches' in e) {
-      if (e.cancelable) e.preventDefault();
-      isTouching.current = true;
-    } else if (isTouching.current) {
-      // Ignore mouse events if we just had a touch event
-      return;
+      isTouchDevice.current = true;
+    } else if (isTouchDevice.current && (!e || !('touches' in e))) {
+      // If we've seen touch events recently, ignore mouse events for a while
+      const now = Date.now();
+      if (now - lastEventTime.current < 500) return;
+    }
+
+    const now = Date.now();
+    lastEventTime.current = now;
+
+    if (e && 'touches' in e && e.cancelable) {
+      e.preventDefault();
     }
 
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -655,27 +693,19 @@ export default function App() {
   };
 
   const handleKeyPressEnd = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    if (e && 'touches' in e) {
-      // isTouching remains true
-    } else if (isTouching.current && (!e || !('touches' in e))) {
-      return;
+    // Prevent double processing on end (simulated mouse events)
+    if (e && !('touches' in e) && isTouchDevice.current) {
+      const now = Date.now();
+      if (now - lastEventTime.current < 500) return;
     }
 
-    // Process the click
     if (longPressTimer.current) {
+      // It was a short click
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
       handleKeyClick(keyId, false);
     }
   };
-
-  // Reset isTouching on a timer or global move to eventually allow mouse if needed
-  useEffect(() => {
-    const resetTouch = () => {
-      // We don't reset isTouching because we want to stick to one mode per session
-    };
-    window.addEventListener('touchstart', () => { isTouching.current = true; }, { passive: true });
-  }, []);
 
   const generateRoom = async () => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -726,8 +756,8 @@ import pyautogui
 import pyperclip
 import json
 
-# Optimize pyautogui
-pyautogui.PAUSE = 0.05 # Increased for UI stability
+# Optimize pyautogui for speed
+pyautogui.PAUSE = 0.01
 pyautogui.FAILSAFE = True
 
 # Global variables
@@ -748,20 +778,18 @@ def process_event(event_data):
             print(f" [-] Backspace x{delete_count}")
             for _ in range(delete_count):
                 pyautogui.press('backspace')
-                time.sleep(0.01) # Small delay for reliability
         
         # 2. Perform inserts
         if insert_text:
             print(f" [+] Typing: {insert_text}")
-            # Use clipboard for perfect Unicode/Korean support
+            # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
-            time.sleep(0.1) # Wait for clipboard
+            time.sleep(0.05) # Increased delay for clipboard stability across apps
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.05)
-            pyperclip.copy('') # Flush clipboard
+            time.sleep(0.02) # Extra small delay for OS processing
                 
     elif etype == 'command':
         cmd = edata.get('cmd')
@@ -774,12 +802,12 @@ def process_event(event_data):
         elif cmd == 'clear':
             if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
             else: pyautogui.hotkey('ctrl', 'a')
-            time.sleep(0.1)
+            time.sleep(0.05)
             pyautogui.press('backspace')
             
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-        pyautogui.moveRel(dx * 2.5, dy * 2.5, duration=0.01)
+        pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
         
     elif etype == 'mouse-click':
         btn = edata.get('button', 'left')
@@ -787,7 +815,6 @@ def process_event(event_data):
 
 def run_helper(room_id):
     print(f"\\n[+] Monitoring Room: {room_id}")
-    print("[!] Stop with Ctrl+C")
     last_processed_timestamp = int(time.time() * 1000)
     session = requests.Session()
     first_run = True
@@ -839,46 +866,54 @@ def run_helper(room_id):
                                         elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
                                     process_event(event_data)
                                 except Exception as e:
-                                    pass
+                                    print(f"Error processing event: {e}")
                 first_run = False
             elif response.status_code == 404:
-                print(f"\\n[!] Room {room_id} not found.")
+                print(f"\\n[!] 룸 {room_id}를 찾을 수 없습니다. (핸드폰이 꺼져있거나 코드가 틀림)")
                 return False
             
             time.sleep(0.01)
     except KeyboardInterrupt:
-        print("\\n[!] Interrupted by user.")
+        print("\\n[!] 사용자에 의해 정지되었습니다.")
         return True
 
 if __name__ == "__main__":
-    print("="*50)
-    print(" Cheonjiin Remote Helper (v2.2)")
-    print("="*50)
+    print("--------------------------------------------------")
+    print("천지인 리모트 데스크탑 도우미 (v2.2 - Stabilized)")
+    print("--------------------------------------------------")
     
     current_room = '${roomId}' if '${roomId}' else None
     
     while True:
-        if not current_room:
-            print("\\n" + "-"*50)
-            current_room = input("[?] Enter Room Code (or 'exit'): ").strip().upper()
+        if current_room:
+            print(f"\\n[*] 현재 설정된 룸 코드: {current_room}")
+            print("[1] 이 코드로 즉시 시작")
+            print("[2] 다른 룸 코드 입력")
+            print("[3] 프로그램 종료")
+            choice = input("\\n[?] 선택하세요 (기본값: 1): ").strip()
+            
+            if choice == '2':
+                current_room = None
+            elif choice == '3':
+                break
+            else:
+                pass
         
-        if not current_room or current_room == 'EXIT': 
-            break
+        if not current_room:
+            current_room = input("\\n[?] 연결할 룸 코드를 입력하세요 (6자리): ").strip().upper()
+        
+        if not current_room: continue
+        if current_room.lower() == 'exit': break
         
         try:
-            # If run_helper returns True, it was interrupted by user (Ctrl+C)
-            # This allows the user to decide whether to change room or exit
-            is_exit_requested = run_helper(current_room)
-            if is_exit_requested:
-                choice = input("\\n[?] Change room? (y/n): ").strip().lower()
-                if choice == 'y':
-                    current_room = None
-                    continue
-                else:
-                    break
+            success = run_helper(current_room)
+            if success: # Manual stop via KeyboardInterrupt
+                print("\\n[!] 작업을 중단합니다.")
+                current_room = None
+                continue
         except Exception as e:
-            print(f"\\n[!] Error: {e}")
-            current_room = None
+            print(f"\\n[!] 오류 발생: {e}")
+            time.sleep(2)
         
         current_room = None
 `.trim();
@@ -907,7 +942,8 @@ if __name__ == "__main__":
     window.history.pushState({}, '', window.location.origin + window.location.pathname);
   };
 
-  const renderChoice = () => (
+  if (mode === 'choice') {
+    return (
       <div className="min-h-screen bg-[#E4E3E0] flex flex-col items-center justify-center p-6 font-sans">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -961,7 +997,8 @@ if __name__ == "__main__":
           </div>
         </motion.div>
       </div>
-  );
+    );
+  }
 
   const togglePip = async () => {
     // Check if we are in an iframe
@@ -1040,7 +1077,7 @@ if __name__ == "__main__":
     }
   };
 
-  const renderReceiver = () => {
+  if (mode === 'receiver') {
     const getBaseUrl = () => {
       const url = new URL(window.location.href);
       return url.origin + url.pathname;
@@ -1159,7 +1196,7 @@ if __name__ == "__main__":
     }
 
     return (
-      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans overflow-auto">
+      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Main Display */}
           <div className="lg:col-span-8 space-y-6">
@@ -1354,7 +1391,7 @@ if __name__ == "__main__":
         </div>
       </div>
     );
-  };
+  }
 
   // Sender (Mobile Keyboard)
   const handleTouchMove = (e: any) => {
@@ -1379,7 +1416,8 @@ if __name__ == "__main__":
     mouseRef.current = { x: 0, y: 0 };
   };
 
-  const renderError = () => (
+  if (hasError) {
+    return (
       <div className="min-h-screen bg-red-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="bg-white p-8 rounded-2xl shadow-xl border border-red-200 max-w-sm">
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1398,11 +1436,8 @@ if __name__ == "__main__":
           </div>
         </div>
       </div>
-  );
-
-  if (hasError) return renderError();
-  if (mode === 'choice') return renderChoice();
-  if (mode === 'receiver') return renderReceiver();
+    );
+  }
 
   return (
     <div className="fixed inset-0 min-h-screen h-screen-fix bg-[#F2F2F2] flex flex-col font-sans text-[#1c1d21] overflow-hidden select-none touch-none">
@@ -1470,44 +1505,20 @@ if __name__ == "__main__":
                 </div>
               </div>
 
-            {/* Galaxy Style Keyboard - Dark Theme */}
+            {/* Keypad Container */}
             <div 
-              className="bg-black p-1 pb-6 shrink-0 transition-transform duration-200 ease-out"
-              style={{ transform: `translateY(${-keyboardOffset}px)` }}
+              className="bg-black p-1 pb-6 shrink-0 relative flex flex-col"
+              style={{ height: `${keyboardHeight}px` }}
             >
-              {/* Keyboard Height Adjustment Handle */}
-              <div className="flex justify-center items-center h-6 mb-1 cursor-ns-resize group"
-                onMouseDown={(e) => {
-                  const startY = e.clientY;
-                  const startOffset = keyboardOffset;
-                  const onMove = (moveEvent: MouseEvent) => {
-                    const diff = startY - moveEvent.clientY;
-                    setKeyboardOffset(Math.max(-50, Math.min(350, startOffset + diff)));
-                  };
-                  const onUp = () => {
-                    window.removeEventListener('mousemove', onMove);
-                    window.removeEventListener('mouseup', onUp);
-                  };
-                  window.addEventListener('mousemove', onMove);
-                  window.addEventListener('mouseup', onUp);
-                }}
-                onTouchStart={(e) => {
-                  const startY = e.touches[0].clientY;
-                  const startOffset = keyboardOffset;
-                  const onMove = (touchEvent: TouchEvent) => {
-                    const diff = startY - touchEvent.touches[0].clientY;
-                    setKeyboardOffset(Math.max(-50, Math.min(350, startOffset + diff)));
-                  };
-                  const onEnd = () => {
-                    window.removeEventListener('touchmove', onMove);
-                    window.removeEventListener('touchend', onEnd);
-                  };
-                  window.addEventListener('touchmove', onMove);
-                  window.addEventListener('touchend', onEnd);
-                }}
+              {/* Resize Handle */}
+              <div 
+                className="absolute -top-3 left-0 right-0 h-6 flex items-center justify-center cursor-ns-resize z-50 touch-none"
+                onMouseDown={() => setIsResizing(true)}
+                onTouchStart={() => setIsResizing(true)}
               >
-                <div className="w-12 h-1 bg-white/20 rounded-full group-hover:bg-white/40 transition-colors"></div>
+                <div className="w-12 h-1.5 bg-white/30 rounded-full shadow-lg"></div>
               </div>
+
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
@@ -1596,11 +1607,11 @@ if __name__ == "__main__":
                     {['q','w','e','r','t','y','u','i','o','p'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={(e) => handleKeyPressStart(k, e)}
-                        onMouseUp={(e) => handleKeyPressEnd(k, e)}
-                        onMouseLeave={(e) => handleKeyPressEnd(k, e)}
-                        onTouchStart={(e) => handleKeyPressStart(k, e)}
-                        onTouchEnd={(e) => handleKeyPressEnd(k, e)}
+                        onMouseDown={() => handleKeyPressStart(k)}
+                        onMouseUp={() => handleKeyPressEnd(k)}
+                        onMouseLeave={() => handleKeyPressEnd(k, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                        onTouchEnd={() => handleKeyPressEnd(k)}
                         className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                       >{k}</button>
                     ))}
@@ -1610,11 +1621,11 @@ if __name__ == "__main__":
                     {['a','s','d','f','g','h','j','k','l'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={(e) => handleKeyPressStart(k, e)}
-                        onMouseUp={(e) => handleKeyPressEnd(k, e)}
-                        onMouseLeave={(e) => handleKeyPressEnd(k, e)}
-                        onTouchStart={(e) => handleKeyPressStart(k, e)}
-                        onTouchEnd={(e) => handleKeyPressEnd(k, e)}
+                        onMouseDown={() => handleKeyPressStart(k)}
+                        onMouseUp={() => handleKeyPressEnd(k)}
+                        onMouseLeave={() => handleKeyPressEnd(k, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                        onTouchEnd={() => handleKeyPressEnd(k)}
                         className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                       >{k}</button>
                     ))}
@@ -1631,11 +1642,11 @@ if __name__ == "__main__":
                       {['z','x','c','v','b','n','m'].map(k => (
                         <button 
                           key={k} 
-                          onMouseDown={(e) => handleKeyPressStart(k, e)}
-                          onMouseUp={(e) => handleKeyPressEnd(k, e)}
-                          onMouseLeave={(e) => handleKeyPressEnd(k, e)}
-                          onTouchStart={(e) => handleKeyPressStart(k, e)}
-                          onTouchEnd={(e) => handleKeyPressEnd(k, e)}
+                          onMouseDown={() => handleKeyPressStart(k)}
+                          onMouseUp={() => handleKeyPressEnd(k)}
+                          onMouseLeave={() => handleKeyPressEnd(k, true)}
+                          onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                          onTouchEnd={() => handleKeyPressEnd(k)}
                           className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                         >{k}</button>
                       ))}

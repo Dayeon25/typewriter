@@ -134,6 +134,7 @@ export default function App() {
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
   const [pipWindow, setPipWindow] = useState<any>(null);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(380); // Default keyboard height
   
   // Viewport Height Fix for Mobile
@@ -661,6 +662,9 @@ export default function App() {
       longPressTimer.current = null;
       handleKeyClick(keyId, false);
     }
+    if (e && 'touches' in e && e.cancelable) {
+      e.preventDefault();
+    }
   };
 
   const generateRoom = async () => {
@@ -712,8 +716,8 @@ import pyautogui
 import pyperclip
 import json
 
-# Optimize pyautogui for speed
-pyautogui.PAUSE = 0.01
+# Optimize pyautogui
+pyautogui.PAUSE = 0.05 # Increased for UI stability
 pyautogui.FAILSAFE = True
 
 # Global variables
@@ -734,18 +738,20 @@ def process_event(event_data):
             print(f" [-] Backspace x{delete_count}")
             for _ in range(delete_count):
                 pyautogui.press('backspace')
+                time.sleep(0.01) # Small delay for reliability
         
         # 2. Perform inserts
         if insert_text:
             print(f" [+] Typing: {insert_text}")
-            # Use clipboard to ensure Korean assembly is perfect
+            # Use clipboard for perfect Unicode/Korean support
             pyperclip.copy(insert_text)
-            time.sleep(0.05) # Increased delay for clipboard stability across apps
+            time.sleep(0.1) # Wait for clipboard
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.02) # Extra small delay for OS processing
+            time.sleep(0.05)
+            pyperclip.copy('') # Flush clipboard
                 
     elif etype == 'command':
         cmd = edata.get('cmd')
@@ -758,12 +764,12 @@ def process_event(event_data):
         elif cmd == 'clear':
             if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
             else: pyautogui.hotkey('ctrl', 'a')
-            time.sleep(0.05)
+            time.sleep(0.1)
             pyautogui.press('backspace')
             
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-        pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
+        pyautogui.moveRel(dx * 2.5, dy * 2.5, duration=0.01)
         
     elif etype == 'mouse-click':
         btn = edata.get('button', 'left')
@@ -771,6 +777,7 @@ def process_event(event_data):
 
 def run_helper(room_id):
     print(f"\\n[+] Monitoring Room: {room_id}")
+    print("[!] Stop with Ctrl+C")
     last_processed_timestamp = int(time.time() * 1000)
     session = requests.Session()
     first_run = True
@@ -822,41 +829,47 @@ def run_helper(room_id):
                                         elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
                                     process_event(event_data)
                                 except Exception as e:
-                                    print(f"Error processing event: {e}")
+                                    pass
                 first_run = False
             elif response.status_code == 404:
-                print(f"\\n[!] 룸 {room_id}를 찾을 수 없습니다. (핸드폰이 꺼져있거나 코드가 틀림)")
+                print(f"\\n[!] Room {room_id} not found.")
                 return False
             
             time.sleep(0.01)
     except KeyboardInterrupt:
-        print("\\n[!] 사용자에 의해 정지되었습니다.")
+        print("\\n[!] Interrupted by user.")
         return True
 
 if __name__ == "__main__":
-    print("--------------------------------------------------")
-    print("천지인 리모트 데스크탑 도우미 (v2.1 - Enhanced)")
-    print("--------------------------------------------------")
+    print("="*50)
+    print(" Cheonjiin Remote Helper (v2.2)")
+    print("="*50)
     
     current_room = '${roomId}' if '${roomId}' else None
     
     while True:
         if not current_room:
-            print("\\n" + "="*50)
-            current_room = input("[?] 연결할 룸 코드를 입력하세요 (예: ABCDEF, 'exit'로 종료): ").strip().upper()
+            print("\\n" + "-"*50)
+            current_room = input("[?] Enter Room Code (or 'exit'): ").strip().upper()
         
         if not current_room or current_room == 'EXIT': 
             break
         
         try:
-            success = run_helper(current_room)
-            if success: # Manual stop
-                break
+            # If run_helper returns True, it was interrupted by user (Ctrl+C)
+            # This allows the user to decide whether to change room or exit
+            is_exit_requested = run_helper(current_room)
+            if is_exit_requested:
+                choice = input("\\n[?] Change room? (y/n): ").strip().lower()
+                if choice == 'y':
+                    current_room = None
+                    continue
+                else:
+                    break
         except Exception as e:
-            print(f"\\n[!] 오류 발생: {e}")
+            print(f"\\n[!] Error: {e}")
+            current_room = None
         
-        # Room not found or error, ask for new code
-        print("\\n[!] 룸 연결이 종료되었습니다.")
         current_room = None
 `.trim();
 
@@ -1448,7 +1461,43 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-6 shrink-0">
+            <div 
+              className="bg-black p-1 pb-6 shrink-0 transition-transform duration-200 ease-out"
+              style={{ transform: `translateY(${-keyboardOffset}px)` }}
+            >
+              {/* Keyboard Height Adjustment Handle */}
+              <div className="flex justify-center items-center h-6 mb-1 cursor-ns-resize group"
+                onMouseDown={(e) => {
+                  const startY = e.clientY;
+                  const startOffset = keyboardOffset;
+                  const onMove = (moveEvent: MouseEvent) => {
+                    const diff = startY - moveEvent.clientY;
+                    setKeyboardOffset(Math.max(-50, Math.min(350, startOffset + diff)));
+                  };
+                  const onUp = () => {
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                  };
+                  window.addEventListener('mousemove', onMove);
+                  window.addEventListener('mouseup', onUp);
+                }}
+                onTouchStart={(e) => {
+                  const startY = e.touches[0].clientY;
+                  const startOffset = keyboardOffset;
+                  const onMove = (touchEvent: TouchEvent) => {
+                    const diff = startY - touchEvent.touches[0].clientY;
+                    setKeyboardOffset(Math.max(-50, Math.min(350, startOffset + diff)));
+                  };
+                  const onEnd = () => {
+                    window.removeEventListener('touchmove', onMove);
+                    window.removeEventListener('touchend', onEnd);
+                  };
+                  window.addEventListener('touchmove', onMove);
+                  window.addEventListener('touchend', onEnd);
+                }}
+              >
+                <div className="w-12 h-1 bg-white/20 rounded-full group-hover:bg-white/40 transition-colors"></div>
+              </div>
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

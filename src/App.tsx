@@ -550,13 +550,16 @@ export default function App() {
     
     // Send ABSOLUTE state for maximum reliability on flaky connections like Vercel
     const timeout = setTimeout(() => {
-      emitEvent('sync-state', {
+      // Create a snapshot of the current state to send
+      const payload = {
         committedText: inputState.committedText,
         composition: inputState.composition,
         ts: t
-      });
+      };
+      
+      emitEvent('sync-state', payload);
       setLastSentDisplay(currentFullText);
-    }, 50); 
+    }, 30); // Very fast sync for natural feel
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -1513,7 +1516,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-16 shrink-0">
+            <div className="bg-black p-1 pb-32 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

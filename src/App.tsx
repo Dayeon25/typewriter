@@ -318,11 +318,14 @@ export default function App() {
         } else if (event.type === 'click' || event.type === 'mouse-click') {
           const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
           if (el instanceof HTMLElement) el.click();
-        } else if (event.type === 'sync-state') {
-          const { committedText, composition } = event.data;
-          setInputState({
-            committedText: committedText || '',
-            composition: composition || []
+        } else if (event.type === 'sync-text') {
+          const { deleteCount, insertText } = event.data;
+          setInputState(prev => {
+            const currentCommitted = prev.committedText || '';
+            return {
+              committedText: currentCommitted.slice(0, Math.max(0, currentCommitted.length - (deleteCount || 0))) + (insertText || ''),
+              composition: []
+            };
           });
         }
       }
@@ -365,11 +368,14 @@ export default function App() {
             } else if (event.type === 'click' || event.type === 'mouse-click') {
               const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
               if (el instanceof HTMLElement) el.click();
-            } else if (event.type === 'sync-state') {
-              const { committedText, composition } = event.data;
-              setInputState({
-                committedText: committedText || '',
-                composition: composition || []
+            } else if (event.type === 'sync-text') {
+              const { deleteCount, insertText } = event.data;
+              setInputState(prev => {
+                const currentCommitted = prev.committedText || '';
+                return {
+                  committedText: currentCommitted.slice(0, Math.max(0, currentCommitted.length - (deleteCount || 0))) + (insertText || ''),
+                  composition: []
+                };
               });
             }
           }
@@ -546,20 +552,29 @@ export default function App() {
 
     if (currentFullText === lastSentDisplay) return;
 
-    const t = Date.now();
-    
-    // Send ABSOLUTE state for maximum reliability on flaky connections like Vercel
     const timeout = setTimeout(() => {
-      // Create a snapshot of the current state to send
-      const payload = {
-        committedText: inputState.committedText,
-        composition: inputState.composition,
-        ts: t
-      };
-      
-      emitEvent('sync-state', payload);
-      setLastSentDisplay(currentFullText);
-    }, 30); // Very fast sync for natural feel
+      const oldText = lastSentDisplay;
+      const newText = currentFullText;
+
+      // Find common prefix
+      let commonLen = 0;
+      const minLen = Math.min(oldText.length, newText.length);
+      while (commonLen < minLen && oldText[commonLen] === newText[commonLen]) {
+        commonLen++;
+      }
+
+      const backspaces = oldText.length - commonLen;
+      const insertText = newText.substring(commonLen);
+
+      if (backspaces > 0 || insertText.length > 0) {
+        emitEvent('sync-text', {
+          deleteCount: backspaces,
+          insertText: insertText,
+          ts: Date.now()
+        });
+        setLastSentDisplay(newText);
+      }
+    }, 40);
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -1516,7 +1531,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-32 shrink-0">
+            <div className="bg-black p-1 pb-20 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

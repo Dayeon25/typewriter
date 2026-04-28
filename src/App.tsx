@@ -19,6 +19,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 import ReactDOM from 'react-dom';
 import { db } from './firebase';
+import firebaseConfig from '../firebase-applet-config.json';
 import { 
   doc, 
   setDoc, 
@@ -434,7 +435,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 300); // Debounced to save quota
+    }, 500); // Increased debounce to save more quota
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected]);
@@ -451,7 +452,7 @@ export default function App() {
           inputState: inputState,
           lastUpdate: serverTimestamp()
         }).catch(err => console.error("Sync error:", err));
-      }, 2000); // Sync full state every 2 seconds to save quota
+      }, 3000); // Sync full state every 3 seconds to save quota
       return () => clearTimeout(timeout);
     }
   }, [inputState, mode, roomId, isConnected]);
@@ -713,14 +714,14 @@ import pyautogui
 import pyperclip
 import json
 
-# Optimize pyautogui for speed
+# 최적화된 마우스/키보드 설정
 pyautogui.PAUSE = 0.005
 pyautogui.FAILSAFE = True
 
-# Global variables
-PROJECT_ID = "gen-lang-client-0554047813"
-DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
-API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
+# 글로벌 변수 설정
+PROJECT_ID = "${firebaseConfig.projectId}"
+DATABASE_ID = "${firebaseConfig.firestoreDatabaseId || 'default'}"
+API_KEY = "${firebaseConfig.apiKey}"
 
 def process_event(event_data):
     etype = event_data.get('type')
@@ -730,19 +731,18 @@ def process_event(event_data):
         delete_count = edata.get('deleteCount', 0)
         insert_text = edata.get('insertText', '')
         
-        # 1. Perform deletes
+        # 1. 삭제 작업 수행
         if delete_count > 0:
-            print(f" [-] Backspace x{delete_count}")
+            print(f" [-] 삭제: {delete_count}글자")
             for _ in range(delete_count):
                 pyautogui.press('backspace', _pause=False)
             time.sleep(0.005)
         
-        # 2. Perform inserts
+        # 2. 입력 작업 수행 (클립보드 방식이 가장 정확합니다)
         if insert_text:
-            print(f" [+] Typing: {insert_text}")
-            # Use clipboard to ensure Korean assembly is perfect
+            print(f" [+] 입력: {insert_text}")
             pyperclip.copy(insert_text)
-            time.sleep(0.01) # Faster clipboard delay
+            time.sleep(0.01)
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
@@ -758,6 +758,7 @@ def process_event(event_data):
             if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
             else: pyautogui.hotkey('ctrl', 'a')
             pyautogui.press('backspace')
+            print(" [!] 입력창 초기화")
             
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
@@ -827,7 +828,7 @@ def run_helper(room_id):
                 print(f"\n[!] 룸 {room_id}를 찾을 수 없습니다. (핸드폰이 꺼져있거나 코드가 틀림)")
                 return False
             
-            time.sleep(0.6) # Optimized polling to save Firestore quota
+            time.sleep(1.0) # Optimized polling to save Firestore quota
     except KeyboardInterrupt:
         print("\\n[!] 사용자에 의해 정지되었습니다.")
         return True
@@ -1039,15 +1040,15 @@ if __name__ == "__main__":
               <button 
                 onClick={() => pipWindow.close()} 
                 className="p-1.5 hover:bg-red-500 rounded bg-white/10 transition-colors"
-                title="Close Window"
+                title="창 닫기"
               >
                 <CornerDownLeft className="w-3 h-3" />
               </button>
             )}
             <button 
               onClick={resetApp} 
-              className="p-1.5 hover:bg-red-500 rounded bg-white/10 transition-colors"
-              title="Exit Room"
+              className="p-1.5 hover:bg-red-600 rounded bg-white/10 transition-colors"
+              title="홈으로"
             >
               <RefreshCw className="w-3 h-3" />
             </button>
@@ -1514,7 +1515,7 @@ if __name__ == "__main__":
                               onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                               onPointerUp={stopBackspace}
                               onPointerLeave={stopBackspace}
-                              className="w-[12%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm transform active:scale-95 transition-transform"
+                              className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm transform active:scale-95 transition-transform"
                             >
                               <Delete className="w-5 h-5 text-gray-700" />
                             </button>
@@ -1522,12 +1523,12 @@ if __name__ == "__main__":
                         }
                         if (key === 'ABC') {
                           return (
-                            <button key={key} onPointerDown={() => setInputMode('en')} className="w-[14%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">ABC</button>
+                            <button key={key} onPointerDown={() => setInputMode('en')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">ABC</button>
                           );
                         }
                         if (key === 'mode') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-12 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
+                            <button key={key} onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
                               <span>한</span>
                               <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
                               <span className="ml-1">영</span>
@@ -1536,26 +1537,26 @@ if __name__ == "__main__":
                         }
                         if (key === 'space') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('space')} className="flex-1 h-12 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-gray-50">
-                              <div className="w-16 h-1 bg-gray-200 rounded-full"></div>
+                            <button key={key} onPointerDown={() => handleKeyClick('space')} className="flex-1 h-10 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-blue-50 border-b-2 border-blue-200">
+                              <div className="w-16 h-1 bg-blue-100 rounded-full"></div>
                             </button>
                           );
                         }
                         if (key === 'enter') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
+                            <button key={key} onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
                               <CornerDownLeft className="w-5 h-5 text-gray-700" />
                             </button>
                           );
                         }
                         if (key === '1/2') {
                           return (
-                            <button key={key} onPointerDown={() => setSymbolPage(2)} className="w-[12%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">1/2</button>
+                            <button key={key} onPointerDown={() => setSymbolPage(2)} className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">1/2</button>
                           );
                         }
                         if (key === '2/2') {
                           return (
-                            <button key={key} onPointerDown={() => setSymbolPage(1)} className="w-[12%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">2/2</button>
+                            <button key={key} onPointerDown={() => setSymbolPage(1)} className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">2/2</button>
                           );
                         }
                         return (
@@ -1564,7 +1565,7 @@ if __name__ == "__main__":
                             onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key); }}
                             onPointerUp={() => handleKeyPressEnd(key)}
                             onPointerLeave={() => handleKeyPressEnd(key, true)}
-                            className={`flex-1 h-12 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium active:bg-gray-100 shadow-sm transform active:scale-95 transition-transform`}
+                            className={`flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium active:bg-gray-100 shadow-sm transform active:scale-95 transition-transform`}
                           >
                             {key}
                           </button>
@@ -1578,7 +1579,7 @@ if __name__ == "__main__":
                   {/* Row 1: Numbers */}
                   <div className="flex gap-1">
                     {['1','2','3','4','5','6','7','8','9','0'].map(k => (
-                      <button key={k} onPointerDown={() => handleKeyClick(k)} className="flex-1 h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium active:bg-gray-100 shadow-sm">{k}</button>
+                      <button key={k} onPointerDown={() => handleKeyClick(k)} className="flex-1 h-9 bg-white rounded-md flex items-center justify-center text-gray-800 text-sm font-medium active:bg-gray-100 shadow-sm">{k}</button>
                     ))}
                   </div>
                   {/* Row 2: QWERTY */}
@@ -1589,7 +1590,7 @@ if __name__ == "__main__":
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                         onPointerUp={() => handleKeyPressEnd(k)}
                         onPointerLeave={() => handleKeyPressEnd(k, true)}
-                        className="flex-1 h-12 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-sm"
+                        className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
                       >{k}</button>
                     ))}
                   </div>
@@ -1601,13 +1602,13 @@ if __name__ == "__main__":
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                         onPointerUp={() => handleKeyPressEnd(k)}
                         onPointerLeave={() => handleKeyPressEnd(k, true)}
-                        className="flex-1 h-12 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-sm"
+                        className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
                       >{k}</button>
                     ))}
                   </div>
                   {/* Row 4: Shift, ZXCV, Backspace */}
                   <div className="flex gap-1">
-                    <button onPointerDown={() => handleKeyClick('shift')} className={`w-[13%] h-12 rounded-md flex items-center justify-center transition-colors shadow-sm ${shiftState === 2 ? 'bg-blue-500 text-white' : shiftState === 1 ? 'bg-gray-800 text-white' : 'bg-[#D1D1D6] text-gray-700'}`}>
+                    <button onPointerDown={() => handleKeyClick('shift')} className={`w-[13%] h-10 rounded-md flex items-center justify-center transition-colors shadow-sm ${shiftState === 2 ? 'bg-blue-500 text-white' : shiftState === 1 ? 'bg-gray-800 text-white' : 'bg-[#D1D1D6] text-gray-700'}`}>
                       <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
                         <path d="M12 4l-8 8h5v8h6v-8h5z"/>
                         {shiftState === 2 && <rect x="4" y="2" width="16" height="2" />}
@@ -1620,7 +1621,7 @@ if __name__ == "__main__":
                           onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                           onPointerUp={() => handleKeyPressEnd(k)}
                           onPointerLeave={() => handleKeyPressEnd(k, true)}
-                          className="flex-1 h-12 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-sm"
+                          className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
                         >{k}</button>
                       ))}
                     </div>
@@ -1628,25 +1629,25 @@ if __name__ == "__main__":
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                       onPointerUp={stopBackspace}
                       onPointerLeave={stopBackspace}
-                      className="w-[13%] h-12 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm"
+                      className="w-[13%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm"
                     >
                       <Delete className="w-5 h-5 text-gray-700" />
                     </button>
                   </div>
                   {/* Row 5: Bottom Bar */}
                   <div className="flex gap-1">
-                    <button onPointerDown={() => setInputMode('sym')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">!#1</button>
-                    <button onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
+                    <button onPointerDown={() => setInputMode('sym')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">!#1</button>
+                    <button onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
                       <span>한</span>
                       <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
                       <span className="ml-1">영</span>
                     </button>
-                    <button onPointerDown={() => handleKeyClick(',')} className="w-[10%] h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">,</button>
-                    <button onPointerDown={() => handleKeyClick('space')} className="flex-1 h-11 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-gray-100">
-                      <div className="w-16 h-1 bg-gray-200 rounded-full"></div>
+                    <button onPointerDown={() => handleKeyClick(',')} className="w-[10%] h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">,</button>
+                    <button onPointerDown={() => handleKeyClick('space')} className="flex-1 h-10 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-blue-50 border-b-2 border-blue-200">
+                      <div className="w-16 h-1 bg-blue-100 rounded-full"></div>
                     </button>
-                    <button onPointerDown={() => handleKeyClick('.')} className="w-[10%] h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">.</button>
-                    <button onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
+                    <button onPointerDown={() => handleKeyClick('.')} className="w-[10%] h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">.</button>
+                    <button onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
                       <CornerDownLeft className="w-5 h-5 text-gray-700" />
                     </button>
                   </div>
@@ -1661,17 +1662,17 @@ if __name__ == "__main__":
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-[4.5rem] bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                       onPointerUp={stopBackspace}
                       onPointerLeave={stopBackspace}
-                      className="h-[4.5rem] bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700"
+                      className="h-14 bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-red-500"
                     >
                       <Delete className="w-7 h-7" />
                     </button>
@@ -1685,15 +1686,15 @@ if __name__ == "__main__":
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-[4.5rem] bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('enter')}
-                      className="h-[4.5rem] bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700"
+                      className="h-14 bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-blue-600"
                     >
                       <CornerDownLeft className="w-7 h-7" />
                     </button>
@@ -1707,32 +1708,32 @@ if __name__ == "__main__":
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-[4.5rem] bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('punct')}
-                      className="h-[4.5rem] bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-50 active:scale-95 transition-all text-xl font-bold text-gray-800 border border-gray-100"
+                      className="h-14 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-50 active:scale-95 transition-all text-lg font-bold text-gray-800 border border-gray-100"
                     >
                       .,?!
                     </button>
                   </div>
 
                   {/* Row 4 */}
-                  <div className="grid grid-cols-4 gap-1.5 h-[4.5rem]">
+                  <div className="grid grid-cols-4 gap-1.5 h-14">
                     <div className="flex gap-1.5">
                       <button 
                         onPointerDown={() => setInputMode('sym')}
-                        className="flex-1 bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-gray-700 active:bg-[#C7C7CC] transition-all active:scale-95"
+                        className={`flex-1 rounded-xl shadow-sm flex items-center justify-center text-xs font-bold transition-all active:scale-95 border ${inputMode === 'sym' ? 'bg-blue-600 text-white border-blue-400' : 'bg-[#D1D1D6] text-gray-700 border-transparent'}`}
                       >
                         !#1
                       </button>
                       <button 
                         onPointerDown={() => handleKeyClick('mode')}
-                        className="flex-1 bg-[#D1D1D6] rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold text-gray-700 active:bg-[#C7C7CC] transition-all active:scale-95 leading-tight"
+                        className={`flex-1 rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold transition-all active:scale-95 leading-tight ${inputMode === 'ko' ? 'bg-blue-50 text-blue-600 border border-blue-200 shadow-[inset_0_0_8px_rgba(37,99,235,0.1)]' : 'bg-[#D1D1D6] text-gray-700'}`}
                       >
                         <span>한글</span>
                         <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
@@ -1740,25 +1741,25 @@ if __name__ == "__main__":
                       </button>
                     </div>
                     <button 
-                      onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart('0'); }}
+                      onPointerDown={() => handleKeyClick('0')}
                       onPointerUp={() => handleKeyPressEnd('0')}
                       onPointerLeave={() => handleKeyPressEnd('0', true)}
                       className="bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">0</span>
-                      <span className="text-2xl font-semibold text-gray-800">ㅇㅁ</span>
+                      <span className="text-xl font-semibold text-gray-800">ㅇㅁ</span>
                     </button>
                     <button 
                       onPointerDown={() => handleKeyClick('space')}
-                      className="bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-100 active:scale-95 transition-all border border-gray-100"
+                      className="bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-blue-50 active:scale-95 transition-all border border-gray-100 border-b-2 border-blue-100"
                     >
-                      <div className="w-12 h-1 bg-gray-200 rounded-full"></div>
+                      <div className="w-12 h-1 bg-blue-400 rounded-full"></div>
                     </button>
                     <button 
                       onPointerDown={() => sendCommand('clear')}
-                      className="bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-gray-700 active:bg-[#C7C7CC] transition-all active:scale-95"
+                      className="bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-gray-700 active:bg-red-50 active:text-red-600 transition-all active:scale-95 border border-transparent"
                     >
-                      한자
+                      지우기
                     </button>
                   </div>
                 </div>

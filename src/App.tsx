@@ -280,8 +280,6 @@ export default function App() {
     });
     socketRef.current = socket;
 
-    let lastProcessedSeq = -1;
-
     socket.on('connect', () => {
       addLog(`Connected via ${socket.io.engine.transport.name}`);
       console.log('Socket Connected:', socket.id);
@@ -304,10 +302,6 @@ export default function App() {
 
     socket.on('remote-event', (event) => {
       if (mode === 'receiver') {
-        const seq = event.seq ?? -1;
-        if (seq <= lastProcessedSeq && seq !== -1) return;
-        lastProcessedSeq = seq;
-
         if (event.type === 'mousemove' || event.type === 'mouse-move') {
           const dx = event.data.dx || 0;
           const dy = event.data.dy || 0;
@@ -318,15 +312,6 @@ export default function App() {
         } else if (event.type === 'click' || event.type === 'mouse-click') {
           const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
           if (el instanceof HTMLElement) el.click();
-        } else if (event.type === 'sync-text') {
-          const { deleteCount, insertText } = event.data;
-          setInputState(prev => {
-            const currentCommitted = prev.committedText || '';
-            return {
-              committedText: currentCommitted.slice(0, Math.max(0, currentCommitted.length - (deleteCount || 0))) + (insertText || ''),
-              composition: []
-            };
-          });
         }
       }
       
@@ -345,10 +330,10 @@ export default function App() {
   }, [roomId, mode]);
 
   // REST Polling Fallback for Receiver (Ensures it works even if Socket.io is blocked)
-  const lastPolledSeqRef = useRef(-1);
   useEffect(() => {
     if (mode !== 'receiver' || !roomId || !isConnected) return;
     
+    let lastPolledSeq = -1;
     const poll = async () => {
       try {
         const response = await fetch(`/api/events/${roomId}?since=${Date.now() - 10000}`);
@@ -356,8 +341,8 @@ export default function App() {
         const events = await response.json();
         
         events.forEach((event: any) => {
-          if (event.seq > lastPolledSeqRef.current) {
-            lastPolledSeqRef.current = event.seq;
+          if (event.seq > lastPolledSeq) {
+            lastPolledSeq = event.seq;
             if (event.type === 'mousemove' || event.type === 'mouse-move') {
               const dx = event.data.dx || 0;
               const dy = event.data.dy || 0;
@@ -368,15 +353,6 @@ export default function App() {
             } else if (event.type === 'click' || event.type === 'mouse-click') {
               const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
               if (el instanceof HTMLElement) el.click();
-            } else if (event.type === 'sync-text') {
-              const { deleteCount, insertText } = event.data;
-              setInputState(prev => {
-                const currentCommitted = prev.committedText || '';
-                return {
-                  committedText: currentCommitted.slice(0, Math.max(0, currentCommitted.length - (deleteCount || 0))) + (insertText || ''),
-                  composition: []
-                };
-              });
             }
           }
         });
@@ -552,6 +528,7 @@ export default function App() {
 
     if (currentFullText === lastSentDisplay) return;
 
+    // Throttle / Debounce the sync to laptop to avoid overwhelming the network and Python script
     const timeout = setTimeout(() => {
       const oldText = lastSentDisplay;
       const newText = currentFullText;
@@ -564,17 +541,19 @@ export default function App() {
       }
 
       const backspaces = oldText.length - commonLen;
-      const insertText = newText.substring(commonLen);
+      const t = Date.now();
 
-      if (backspaces > 0 || insertText.length > 0) {
+      // Batch the events - send a single 'sync' event instead of multiple backspace/keypress
+      // This is MUCH more reliable for the Python helper
+      if (backspaces > 0 || commonLen < newText.length) {
         emitEvent('sync-text', {
           deleteCount: backspaces,
-          insertText: insertText,
-          ts: Date.now()
+          insertText: newText.substring(commonLen),
+          ts: t
         });
         setLastSentDisplay(newText);
       }
-    }, 40);
+    }, 20); // Reduced from 300ms to 20ms for much faster response
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -1531,7 +1510,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-20 shrink-0">
+            <div className="bg-black p-1 pb-6 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
@@ -1866,7 +1845,7 @@ if __name__ == "__main__":
       )}
 
       {/* Bottom Bar */}
-      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-10 rounded-full shrink-0"></div>
+      <div className="h-1.5 w-20 bg-gray-300 mx-auto mb-3 rounded-full shrink-0"></div>
     </div>
   );
 }

@@ -10,90 +10,17 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  app.set('trust proxy', 1);
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
-    path: '/socket.io/',
     cors: {
       origin: "*",
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST"],
+      credentials: true
     },
-    transports: ['polling', 'websocket']
-  });
-
-  app.use(express.json());
-
-  // Log all request paths to see if socket.io requests are hitting the server
-  app.use((req, res, next) => {
-    if (req.url.startsWith('/socket.io')) {
-      console.log(`[SOCKET-REQ] ${req.method} ${req.url}`);
-    }
-    next();
-  });
-
-  // API for health check (Place before Vite)
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", uptime: process.uptime() });
-  });
-
-  // In-memory room state storage
-  const roomStates: Record<string, any> = {};
-  const roomEvents: Record<string, any[]> = {};
-  const MAX_EVENTS = 50;
-
-  // REST API to get room state
-  app.get("/api/state/:roomId", (req, res) => {
-    const { roomId } = req.params;
-    res.json(roomStates[roomId] || {});
-  });
-
-  // REST API to update room state
-  app.post("/api/state/:roomId", (req, res) => {
-    const { roomId } = req.params;
-    const { state } = req.body;
-    roomStates[roomId] = { ...roomStates[roomId], ...state };
-    io.to(roomId).emit("room-sync", roomStates[roomId]);
-    res.json({ success: true });
-  });
-
-  // REST API for Python helper to poll
-  app.get("/api/events/:roomId", (req, res) => {
-    const { roomId } = req.params;
-    const since = parseInt(req.query.since as string) || 0;
-    const events = (roomEvents[roomId] || []).filter(e => e.timestamp > since);
-    res.json(events || []);
-  });
-
-  // REST API to post events (Fallback for web app)
-  app.post("/api/events/:roomId", (req, res) => {
-    const { roomId } = req.params;
-    const event = req.body;
-    
-    if (!roomEvents[roomId]) roomEvents[roomId] = [];
-    
-    const newEvent = {
-      ...event,
-      timestamp: Date.now(),
-      seq: (roomEvents[roomId].length > 0 ? roomEvents[roomId][roomEvents[roomId].length - 1].seq + 1 : 0)
-    };
-    
-    roomEvents[roomId].push(newEvent);
-    if (roomEvents[roomId].length > MAX_EVENTS) roomEvents[roomId].shift();
-    
-    io.to(roomId).emit("remote-event", newEvent);
-    res.json({ success: true, timestamp: newEvent.timestamp });
+    allowEIO3: true
   });
 
   const PORT = 3000;
-
-  // Error handling for httpServer
-  httpServer.on('error', (e: any) => {
-    if (e.code === 'EADDRINUSE') {
-      console.error(`[SERVER] Port ${PORT} is already in use. Please wait a moment or restart again.`);
-    } else {
-      console.error("[SERVER] HTTP Server error:", e);
-    }
-  });
 
   // Socket.io logic
   io.on("connection", (socket) => {
@@ -102,30 +29,24 @@ async function startServer() {
     socket.on("join-room", (roomId) => {
       socket.join(roomId);
       console.log(`User ${socket.id} joined room ${roomId}`);
-      
-      // Send current state to joining user
-      if (roomStates[roomId]) {
-        socket.emit("room-sync", roomStates[roomId]);
-      }
     });
 
-    socket.on("update-room-state", ({ roomId, state }) => {
-      roomStates[roomId] = { ...roomStates[roomId], ...state };
-      socket.to(roomId).emit("room-sync", roomStates[roomId]);
+    socket.on("keypress", ({ roomId, char }) => {
+      console.log(`Keypress in room ${roomId}: ${char}`);
+      socket.to(roomId).emit("remote-keypress", char);
     });
 
-    socket.on("remote-event", ({ roomId, event }) => {
-      const newEvent = {
-        ...event,
-        timestamp: Date.now(),
-        seq: (roomEvents[roomId]?.length || 0)
-      };
-      
-      if (!roomEvents[roomId]) roomEvents[roomId] = [];
-      roomEvents[roomId].push(newEvent);
-      if (roomEvents[roomId].length > MAX_EVENTS) roomEvents[roomId].shift();
+    socket.on("command", ({ roomId, cmd }) => {
+      console.log(`Command in room ${roomId}: ${cmd}`);
+      socket.to(roomId).emit("remote-command", cmd);
+    });
 
-      socket.to(roomId).emit("remote-event", newEvent);
+    socket.on("mouse-move", ({ roomId, dx, dy }) => {
+      socket.to(roomId).emit("remote-mouse-move", { dx, dy });
+    });
+
+    socket.on("mouse-click", ({ roomId, button }) => {
+      socket.to(roomId).emit("remote-mouse-click", { button });
     });
 
     socket.on("disconnect", () => {
@@ -149,11 +70,8 @@ async function startServer() {
   }
 
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SERVER] Ready on port ${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer().catch(err => {
-  console.error("[SERVER] Failed to start:", err);
-  process.exit(1);
-});
+startServer();

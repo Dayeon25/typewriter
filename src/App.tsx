@@ -18,7 +18,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as Hangul from 'hangul-js';
 import ReactDOM from 'react-dom';
-import { io, Socket } from 'socket.io-client';
 import { db } from './firebase';
 import { 
   doc, 
@@ -122,8 +121,6 @@ export default function App() {
 
   const [lastSentDisplay, setLastSentDisplay] = useState('');
   const [lastSentTimestamp, setLastSentTimestamp] = useState(0);
-  const [pipWindow, setPipWindow] = useState<any>(null);
-  const [isAutoPipTriggered, setIsAutoPipTriggered] = useState(false);
 
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
@@ -131,95 +128,12 @@ export default function App() {
   const backspaceInterval = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [hasError, setHasError] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
-  const isLongPress = useRef(false);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autoPip') === 'true' && !isInIframe() && !isAutoPipTriggered) {
-      setIsAutoPipTriggered(true);
-      // Wait a bit for the page to load and then try to toggle PiP
-      // Note: This might still require a user gesture, but we'll try
-      const timer = setTimeout(() => {
-        togglePip();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [mode, isAutoPipTriggered]);
-
-  const handlePointerDown = (keyId: string) => {
-    isLongPress.current = false;
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-
-    // Only for numeric/jamo keys
-    const config = KEYPAD_CONFIG.find(k => k.id === keyId);
-    if (config && inputMode === 'ko') {
-      longPressTimer.current = setTimeout(() => {
-        isLongPress.current = true;
-        // Trigger number input
-        handleInput(config.num[0]);
-        // Visual/haptic feedback if possible
-        if ('vibrate' in navigator) navigator.vibrate(50);
-      }, 600); // 600ms for long press
-    }
-  };
-
-  const handlePointerUp = (keyId: string) => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-
-    if (!isLongPress.current) {
-      handleKeyClick(keyId);
-    }
-    isLongPress.current = false;
-  };
-
-  const handlePointerLeave = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    isLongPress.current = false;
-  };
+  const [pipWindow, setPipWindow] = useState<any>(null);
   
-  // Sync Input State to Server (Sender -> Server)
-  useEffect(() => {
-    if (mode !== 'sender' || !roomId || !isConnected) return;
-    
-    const syncState = async () => {
-      // 1. Try Socket.io if connected
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('update-room-state', {
-          roomId,
-          state: { inputState }
-        });
-      }
-      
-      // 2. Always backup via REST for robustness, especially if socket is unstable
-      try {
-        await fetch(`/api/state/${roomId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { inputState } })
-        });
-      } catch (e) {
-        console.error("State sync error", e);
-      }
-    };
-
-    const timeout = setTimeout(syncState, 500); // Throttled sync
-    return () => clearTimeout(timeout);
-  }, [inputState, mode, roomId, isConnected]);
-
-  // Sync State Sync via Socket is handled below in global effects
-
   // Viewport Height Fix for Mobile
   useEffect(() => {
     const setVh = () => {
@@ -230,99 +144,6 @@ export default function App() {
     window.addEventListener('resize', setVh);
     return () => window.removeEventListener('resize', setVh);
   }, []);
-
-  // Helper functions for Cheonjiin processing
-  const mapVowel = (seq: string): string | string[] => {
-    const table: Record<string, string> = {
-      'ㅣㆍ': 'ㅏ', 'ㅣㆍㆍ': 'ㅑ', 'ㆍㅣ': 'ㅓ', 'ㆍㆍㅣ': 'ㅕ',
-      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
-      'ㅡㅣ': 'ㅢ', 'ㅣㆍㅣ': 'ㅐ', 'ㅣㆍㆍㅣ': 'ㅒ', 'ㆍㅣㅣ': 'ㅔ',
-      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ',
-      'ㆍㅡㅣㆍ': 'ㅘ',
-      'ㆍㅡㅣㆍㅣ': 'ㅙ',
-      'ㅡㆍㆍㅣ': 'ㅝ',
-      'ㅡㆍㆍㅣㅣ': 'ㅞ',
-      'ㅡㆍㅣㆍㅣ': 'ㅙ', // User specific request
-      'ㅣ': 'ㅣ', 'ㆍ': 'ㆍ', 'ㅡ': 'ㅡ'
-    };
-    // Special case for single building blocks to ensure they show up
-    if (seq === 'ㆍ') return 'ㆍ'; 
-    if (seq === 'ㅣ') return 'ㅣ';
-    if (seq === 'ㅡ') return 'ㅡ';
-    
-    // Try to find the longest match from the start
-    for (let len = seq.length; len > 0; len--) {
-      const sub = seq.substring(0, len);
-      if (table[sub]) {
-        const remaining = seq.substring(len);
-        if (remaining) {
-          const nextMapped = mapVowel(remaining);
-          return Array.isArray(nextMapped) ? [table[sub], ...nextMapped] : [table[sub], nextMapped];
-        }
-        return table[sub];
-      }
-    }
-    return seq.split('');
-  };
-
-  const processCheonjiin = (jamos: string[]) => {
-    const result: string[] = [];
-    let i = 0;
-    while (i < jamos.length) {
-      const cur = jamos[i];
-      // If it's a Cheonjiin vowel building block
-      if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
-        let seq = cur;
-        let j = i + 1;
-        // Collect consecutive vowel blocks
-        while (j < jamos.length && (jamos[j] === 'ㅣ' || jamos[j] === 'ㆍ' || jamos[j] === 'ㅡ')) {
-          seq += jamos[j];
-          j++;
-        }
-        const mapped = mapVowel(seq);
-        if (Array.isArray(mapped)) {
-          result.push(...mapped);
-        } else {
-          result.push(mapped);
-        }
-        i = j;
-      } else {
-        result.push(cur);
-        i++;
-      }
-    }
-    return result;
-  };
-
-  const processEvent = useCallback((event: any) => {
-    if (mode !== 'receiver') return;
-    
-    const etype = event.type;
-    const edata = event.data || {};
-
-    if (etype === 'mousemove' || etype === 'mouse-move') {
-      const dx = edata.dx || 0;
-      const dy = edata.dy || 0;
-      setMousePos(prev => ({
-        x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
-        y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
-      }));
-    } else if (etype === 'click' || etype === 'mouse-click') {
-      const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
-      if (el instanceof HTMLElement) el.click();
-    } else if (etype === 'sync-text') {
-      setInputState(prev => {
-        const oldText = prev.committedText + (Hangul.assemble(processCheonjiin(prev.composition)) || "");
-        const deleteCount = edata.deleteCount || 0;
-        const newDisplay = oldText.slice(0, Math.max(0, oldText.length - deleteCount)) + (edata.insertText || "");
-        return { committedText: newDisplay, composition: [] };
-      });
-    } else if (etype === 'command') {
-      if (edata.cmd === 'clear') {
-        setInputState({ committedText: '', composition: [] });
-      }
-    }
-  }, [mode, setInputState, setMousePos]);
 
   // Global Error Listener
   useEffect(() => {
@@ -342,93 +163,69 @@ export default function App() {
     setDebugLog(prev => [new Date().toLocaleTimeString() + ': ' + msg, ...prev].slice(0, 5));
   };
 
-  // Initialize Socket.io Connection (Replaces Firestore status sync)
+  // Initialize Firebase Connection Status
   useEffect(() => {
     if (!roomId) return;
     
-    addLog(`Connecting to socket node: ${roomId}`);
+    addLog(`Connecting to room: ${roomId}`);
     
-    const socket = io({
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      autoConnect: true,
-    });
-    socketRef.current = socket;
+    const roomRef = doc(db, 'rooms', roomId);
+    const eventsRef = collection(roomRef, 'events');
+    
+    let lastProcessedTimestamp = Date.now();
 
-    socket.on('connect', () => {
-      addLog(`Connected via ${socket.io.engine.transport.name}`);
-      console.log('Socket Connected:', socket.id);
-      setIsConnected(true);
-      setConnectionError(null);
-      socket.emit('join-room', roomId);
-    });
-
-    socket.on('connect_error', (err) => {
-      // Silently handle socket errors and use polling
-      setIsConnected(true); 
-      setConnectionError(null); 
-    });
-
-    socket.on('room-sync', (data) => {
-      if (mode === 'receiver' && data.inputState) {
-        setInputState(data.inputState);
+    // Listen for room status and state sync
+    const unsubRoom = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setIsConnected(true);
+        setConnectionError(null);
+        // Sync input state from Sender to Receiver
+        if (mode === 'receiver' && data.inputState) {
+          setInputState(data.inputState);
+        }
+      } else {
+        setIsConnected(false);
       }
     });
 
-    socket.on('remote-event', (event) => {
-      processEvent(event);
-      // If Python client is monitoring, they poll the REST API which bridges these events
-    });
-
-    socket.on('disconnect', () => {
-      setIsConnected(false);
-      addLog('Disconnected from server');
-    });
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, [roomId, mode, processEvent]);
-
-  // REST Polling Fallback for Receiver (Ensures it works even if Socket.io is blocked)
-  useEffect(() => {
-    if (mode !== 'receiver' || !roomId || !isConnected) return;
-    
-    let lastPolledSeq = -1;
-    const poll = async () => {
-      try {
-        // Poll for events (for Python-like incremental sync or any side effects)
-        const eventResp = await fetch(`/api/events/${roomId}?since=${Date.now() - 5000}`);
-        if (eventResp.ok) {
-          const events = await eventResp.json();
-          events.forEach((event: any) => {
-            if (event.seq > lastPolledSeq) {
-              lastPolledSeq = event.seq;
-              processEvent(event);
-            }
-          });
-        }
-
-        // Poll for full state (to ensure web laptop view is always in sync)
-        if (!socketRef.current?.connected) {
-          const stateResp = await fetch(`/api/state/${roomId}`);
-          if (stateResp.ok) {
-            const data = await stateResp.json();
-            if (data.inputState) {
-              setInputState(data.inputState);
+    // Listen for events (Receiver logic - Mouse/Clicks only)
+    const q = query(eventsRef, where('timestamp', '>', lastProcessedTimestamp), orderBy('timestamp', 'asc'), orderBy('seq', 'asc'));
+    const unsubEvents = onSnapshot(q, (snapshot) => {
+      if (mode !== 'receiver') return;
+      
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const event = change.doc.data();
+          if (event.timestamp > lastProcessedTimestamp) {
+            lastProcessedTimestamp = event.timestamp;
+            if (event.type === 'mousemove' || event.type === 'mouse-move') {
+              const dx = event.data.dx || 0;
+              const dy = event.data.dy || 0;
+              setMousePos(prev => {
+                const newPos = {
+                  x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+                  y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+                };
+                return newPos;
+              });
+            } else if (event.type === 'click' || event.type === 'mouse-click') {
+              const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+              if (el instanceof HTMLElement) el.click();
             }
           }
         }
-      } catch (e) {}
-    };
+      });
+    }, (err) => {
+      setConnectionError(err.message);
+      addLog(`Firebase error: ${err.message}`);
+    });
 
-    const interval = setInterval(poll, 1000);
-    return () => clearInterval(interval);
-  }, [mode, roomId, isConnected, processEvent]);
+    return () => {
+      unsubRoom();
+      unsubEvents();
+    };
+  }, [roomId, mode]);
 
   useEffect(() => {
     if (autoCopy && mode === 'receiver') {
@@ -466,17 +263,89 @@ export default function App() {
   // Emit Event Helper
   const emitEvent = async (type: string, data: any) => {
     if (!roomId) return;
-    
+    addLog(`Emitting ${type}`);
     try {
-      // Send to REST API which handles both storage for Python and broadcasting via Socket.io
-      await fetch(`/api/events/${roomId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, data })
+      const roomRef = doc(db, 'rooms', roomId);
+      const eventsRef = collection(roomRef, 'events');
+      
+      // Update room heartbeat
+      setDoc(roomRef, { 
+        id: roomId, 
+        updatedAt: serverTimestamp() 
+      }, { merge: true });
+
+      // Add event to subcollection
+      await addDoc(eventsRef, {
+        type,
+        data,
+        timestamp: Date.now(),
+        seq: eventSeq.current++
       });
     } catch (err) {
       console.error('Emit error:', err);
     }
+  };
+
+  const processCheonjiin = (jamos: string[]) => {
+    const result: string[] = [];
+    let i = 0;
+    while (i < jamos.length) {
+      const cur = jamos[i];
+      // If it's a Cheonjiin vowel building block
+      if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
+        let seq = cur;
+        let j = i + 1;
+        // Collect consecutive vowel blocks
+        while (j < jamos.length && (jamos[j] === 'ㅣ' || jamos[j] === 'ㆍ' || jamos[j] === 'ㅡ')) {
+          seq += jamos[j];
+          j++;
+        }
+        const mapped = mapVowel(seq);
+        if (Array.isArray(mapped)) {
+          result.push(...mapped);
+        } else {
+          result.push(mapped);
+        }
+        i = j;
+      } else {
+        result.push(cur);
+        i++;
+      }
+    }
+    return result;
+  };
+
+  const mapVowel = (seq: string): string | string[] => {
+    const table: Record<string, string> = {
+      'ㅣㆍ': 'ㅏ', 'ㅣㆍㆍ': 'ㅑ', 'ㆍㅣ': 'ㅓ', 'ㆍㆍㅣ': 'ㅕ',
+      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
+      'ㅡㅣ': 'ㅢ', 'ㅣㆍㅣ': 'ㅐ', 'ㅣㆍㆍㅣ': 'ㅒ', 'ㆍㅣㅣ': 'ㅔ',
+      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ',
+      'ㆍㅡㅣㆍ': 'ㅘ',
+      'ㆍㅡㅣㆍㅣ': 'ㅙ',
+      'ㅡㆍㆍㅣ': 'ㅝ',
+      'ㅡㆍㆍㅣㅣ': 'ㅞ',
+      'ㅡㆍㅣㆍㅣ': 'ㅙ', // User specific request
+      'ㅣ': 'ㅣ', 'ㆍ': 'ㆍ', 'ㅡ': 'ㅡ'
+    };
+    // Special case for single building blocks to ensure they show up
+    if (seq === 'ㆍ') return 'ㆍ'; 
+    if (seq === 'ㅣ') return 'ㅣ';
+    if (seq === 'ㅡ') return 'ㅡ';
+    
+    // Try to find the longest match from the start
+    for (let len = seq.length; len > 0; len--) {
+      const sub = seq.substring(0, len);
+      if (table[sub]) {
+        const remaining = seq.substring(len);
+        if (remaining) {
+          const nextMapped = mapVowel(remaining);
+          return Array.isArray(nextMapped) ? [table[sub], ...nextMapped] : [table[sub], nextMapped];
+        }
+        return table[sub];
+      }
+    }
+    return seq.split('');
   };
 
   const handleInput = (input: string, isCommand: boolean = false) => {
@@ -528,8 +397,7 @@ export default function App() {
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
 
-    const processed = processCheonjiin(inputState.composition);
-    const currentAssembled = (processed.length === 1 && processed[0] === 'ㆍ') ? 'ㆍ' : (Hangul.assemble(processed) || processed.join(''));
+    const currentAssembled = Hangul.assemble(processCheonjiin(inputState.composition)) || processCheonjiin(inputState.composition).join('');
     const currentFullText = inputState.committedText + currentAssembled;
 
     if (currentFullText === lastSentDisplay) return;
@@ -559,7 +427,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 20); // Reduced from 300ms to 20ms for much faster response
+    }, 50); // Small buffer to allow composition to stabilize
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
@@ -567,7 +435,16 @@ export default function App() {
   const handleInputRef = useRef(handleInput);
   handleInputRef.current = handleInput;
 
-  // Sync state (Sender -> Receiver) - Handled via Socket.io now
+  // Sync state to Firestore (Sender -> Receiver)
+  useEffect(() => {
+    if (mode === 'sender' && roomId && isConnected) {
+      const roomRef = doc(db, 'rooms', roomId);
+      updateDoc(roomRef, {
+        inputState: inputState,
+        lastUpdate: serverTimestamp()
+      }).catch(err => console.error("Sync error:", err));
+    }
+  }, [inputState, mode, roomId, isConnected]);
 
   // Link Laptop Mouse to Virtual Cursor (Receiver side)
   useEffect(() => {
@@ -579,6 +456,33 @@ export default function App() {
       return () => window.removeEventListener('mousemove', handleMouseMove);
     }
   }, [mode]);
+
+  // Air Mouse (Gyroscope) Logic
+  useEffect(() => {
+    if (!isAirMouseActive || activeTab !== 'mouse' || !roomId) return;
+
+    let lastX = 0;
+    let lastY = 0;
+    let lastTime = Date.now();
+
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      const now = Date.now();
+      if (now - lastTime < 40) return; // Throttle
+
+      // Use beta (tilt front/back) and gamma (tilt left/right)
+      const dx = (e.gamma || 0);
+      const dy = (e.beta || 0);
+
+      // Simple deadzone and scaling
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 0.5, dy: dy * mouseSensitivity * 0.5 });
+        lastTime = now;
+      }
+    };
+
+    window.addEventListener('deviceorientation', handleOrientation);
+    return () => window.removeEventListener('deviceorientation', handleOrientation);
+  }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
 
   const lastClickTime = useRef(0);
   const handleKeyClick = (keyId: string) => {
@@ -712,8 +616,17 @@ export default function App() {
     setMode('receiver');
     window.history.pushState({}, '', `?mode=receiver&room=${id}`);
     
-    // No longer need to create in Firestore
-    addLog(`Room created: ${id} (Memory mode)`);
+    // Create room in Firestore
+    try {
+      await setDoc(doc(db, 'rooms', id), {
+        id,
+        createdAt: serverTimestamp(),
+        lastEvent: null
+      });
+      addLog(`Room created: ${id}`);
+    } catch (err) {
+      console.error('Room creation error:', err);
+    }
   };
 
   const sendCommand = (cmd: string) => {
@@ -747,154 +660,139 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.005
+pyautogui.PAUSE = 0.001
 pyautogui.FAILSAFE = True
 
 # Global variables
-SERVER_URL = "${window.location.origin}"
+room_id = '${roomId}'
+PROJECT_ID = "gen-lang-client-0554047813"
+DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
+API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
 
-def main_loop():
-    print("\\n--------------------------------------------------")
-    print("천지인 리모트 헬퍼 v3.0 (할당량 제한 없음)")
-    print("--------------------------------------------------")
+# Get room_id from command line if provided
+if len(sys.argv) > 1:
+    room_id = sys.argv[1]
+else:
+    print(f"Defaulting to Room ID from script: {room_id}")
 
-    # Get room_id
-    default_room_id = '${roomId}'
-    room_id = ""
+print(f"\\nMonitoring Room: {room_id}")
+print("Starting Cheonjiin Helper (v2.0 - Stabilized)...")
+print("--------------------------------------------------")
+print("1. Click the target window to start typing.")
+print("2. Type on your phone - it will sync automatically.")
+print("--------------------------------------------------")
 
-    if len(sys.argv) > 1:
-        room_id = sys.argv[1]
-    else:
-        prompt = f"연결할 룸번호를 입력하세요 (기본: {default_room_id}) [종료: q]: " if default_room_id else "연결할 룸번호를 입력하세요 [종료: q]: "
-        try:
-            print(prompt, end="", flush=True)
-            line = sys.stdin.readline()
-            if not line: return False
-            room_id = line.strip().upper()
-        except EOFError:
-            return False
-            
-        if room_id == 'Q' or room_id == 'EXIT':
-            return False
-            
-        if not room_id:
-            room_id = default_room_id
+last_processed_timestamp = int(time.time() * 1000)
+session = requests.Session()
+first_run = True
 
-    if not room_id:
-        print("오류: 룸번호가 필요합니다.")
-        time.sleep(1)
-        return True
-
-    print(f"\\nMonitoring Room: {room_id}")
-    print("Starting Cheonjiin Helper (Ultra Responsive)...")
-    print(f"Connecting to: {SERVER_URL}")
-    print("--------------------------------------------------")
-    print("1. 타겟 창(메모장, 카톡 등)을 클릭해 포커스를 두세요.")
-    print("2. 핸드폰에서 입력하면 이 컴퓨터로 자동 전달됩니다.")
-    print("3. 할당량 무제한 버전입니다. 마음껏 사용하세요.")
-    print("4. CTRL+C를 누르면 룸번호 입력 화면으로 돌아갑니다.")
-    print("--------------------------------------------------")
-
-    last_processed_timestamp = int(time.time() * 1000)
-    last_processed_seq = -1
-    session = requests.Session()
-    first_run = True
-
-    def process_event(event_data):
-        etype = event_data.get('type')
-        edata = event_data.get('data', {})
+def process_event(event_data):
+    etype = event_data.get('type')
+    edata = event_data.get('data', {})
+    
+    if etype == 'sync-text':
+        delete_count = edata.get('deleteCount', 0)
+        insert_text = edata.get('insertText', '')
         
-        if etype == 'sync-text':
-            delete_count = edata.get('deleteCount', 0)
-            insert_text = edata.get('insertText', '')
-            
-            if delete_count > 0:
-                print(f" [-] Backspace x{delete_count}")
-                for _ in range(delete_count):
-                    pyautogui.press('backspace')
-            
-            if insert_text:
-                print(f" [+] Typing: {insert_text}")
-                try:
-                    if all(ord(c) < 128 for c in insert_text):
-                        pyautogui.write(insert_text)
-                    else:
-                        pyperclip.copy(insert_text)
-                        time.sleep(0.05)
-                        if sys.platform == 'darwin':
-                            pyautogui.hotkey('command', 'v')
-                        else:
-                            pyautogui.hotkey('ctrl', 'v')
-                except Exception as e:
-                    print(f"Typing error: {e}")
-                    pyautogui.write(insert_text)
-                    
-        elif etype == 'command':
-            cmd = edata.get('cmd')
-            if cmd == 'backspace': pyautogui.press('backspace')
-            elif cmd == 'enter': pyautogui.press('enter')
-            elif cmd == 'space': pyautogui.press('space')
-            elif cmd == 'clear':
-                if sys.platform == 'darwin':
-                    pyautogui.hotkey('command', 'a')
-                else:
-                    pyautogui.hotkey('ctrl', 'a')
+        # 1. Perform deletes
+        if delete_count > 0:
+            print(f" [-] Backspace x{delete_count}")
+            for _ in range(delete_count):
                 pyautogui.press('backspace')
+        
+        # 2. Perform inserts
+        if insert_text:
+            print(f" [+] Typing: {insert_text}")
+            # Use clipboard to ensure Korean assembly is perfect
+            pyperclip.copy(insert_text)
+            if sys.platform == 'darwin':
+                pyautogui.hotkey('command', 'v')
+            else:
+                pyautogui.hotkey('ctrl', 'v')
                 
-        elif etype == 'mouse-move':
-            dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-            pyautogui.moveRel(int(dx * 1.5), int(dy * 1.5))
+    elif etype == 'command':
+        cmd = edata.get('cmd')
+        if cmd == 'backspace': pyautogui.press('backspace')
+        elif cmd == 'enter': pyautogui.press('enter')
+        elif cmd == 'space': pyautogui.press('space')
+        elif cmd == 'clear':
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.press('backspace')
             
-        elif etype == 'mouse-click':
-            btn = edata.get('button', 'left')
-            pyautogui.click(button=btn)
+    elif etype == 'mouse-move':
+        dx, dy = edata.get('dx', 0), edata.get('dy', 0)
+        # Mouse speed multiplier
+        pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
+        
+    elif etype == 'mouse-click':
+        btn = edata.get('button', 'left')
+        pyautogui.click(button=btn)
 
-    print("Connected! Waiting for input...")
+# Polling Query
+query_body = {
+    "structuredQuery": {
+        "from": [{"collectionId": "events"}],
+        "where": {
+            "fieldFilter": {
+                "field": {"fieldPath": "timestamp"},
+                "op": "GREATER_THAN",
+                "value": {"integerValue": last_processed_timestamp}
+            }
+        },
+        "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
+    }
+}
 
-    while True:
-        try:
-            # Poll Local Express API instead of Firestore
-            response = session.get(
-                f"{SERVER_URL}/api/events/{room_id}?since={last_processed_timestamp}", 
-                timeout=5
-            )
+print("Connected! Waiting for input...")
+
+while True:
+    try:
+        query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
+        parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
+        
+        response = session.post(
+            f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
+            json=query_body,
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            results = response.json()
             
-            processed_anything = False
-            if response.status_code == 200:
-                events = response.json()
-                
-                for event in events:
-                    ts = event.get('timestamp', 0)
-                    seq = event.get('seq', -1)
+            if len(results) == 1 and 'document' not in results[0]:
+                pass
+            else:
+                for res in results:
+                    doc = res.get('document')
+                    if not doc: continue
                     
-                    if ts > last_processed_timestamp or (ts == last_processed_timestamp and seq > last_processed_seq):
+                    fields = doc.get('fields', {})
+                    ts = int(fields.get('timestamp', {}).get('integerValue', 0))
+                    
+                    if ts > last_processed_timestamp:
                         last_processed_timestamp = ts
-                        last_processed_seq = seq
                         
                         if not first_run:
-                            process_event(event)
-                            processed_anything = True
-            
+                            event_data = {
+                                "type": fields.get('type', {}).get('stringValue'),
+                                "data": {}
+                            }
+                            raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
+                            for k, v in raw_data.items():
+                                if 'stringValue' in v: event_data['data'][k] = v['stringValue']
+                                elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
+                                elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
+                            
+                            process_event(event_data)
+                
             first_run = False
-            # Much faster polling possible without cloud quota worries
-            time.sleep(0.01 if processed_anything else 0.05)
-            
-        except KeyboardInterrupt:
-            print("\\n방 선택 화면으로 돌아갑니다...")
-            time.sleep(0.5)
-            return True
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(2)
-
-if __name__ == "__main__":
-    try:
-        should_continue = True
-        while should_continue:
-            should_continue = main_loop()
+        
+        time.sleep(0.01)
+        
     except KeyboardInterrupt:
-        pass
-    print("Bye!")
+        break
+    except Exception as e:
+        time.sleep(0.5)
 `.trim();
 
   const downloadHelper = () => {
@@ -909,50 +807,9 @@ if __name__ == "__main__":
     URL.revokeObjectURL(url);
   };
 
-  // Air Mouse (Gyroscope) Logic
-  useEffect(() => {
-    if (!isAirMouseActive || activeTab !== 'mouse' || !roomId) return;
-
-    let lastTime = Date.now();
-
-    const handleOrientation = (e: DeviceOrientationEvent) => {
-      const now = Date.now();
-      // Even slower mouse moves - 333ms (3 times per second)
-      if (now - lastTime < 333) return;
-
-      // Use beta (tilt front/back) and gamma (tilt left/right)
-      const dx = (e.gamma || 0);
-      const dy = (e.beta || 0);
-
-      // Simple deadzone and scaling
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 0.5, dy: dy * mouseSensitivity * 0.5 });
-        lastTime = now;
-      }
-    };
-
-    window.addEventListener('deviceorientation', handleOrientation);
-    return () => window.removeEventListener('deviceorientation', handleOrientation);
-  }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
-
-  const isInIframe = () => {
-    try {
-      return window.self !== window.top;
-    } catch (e) {
-      return true;
-    }
-  };
-
-  const quotaBanner = connectionError && connectionError.toLowerCase().includes('quota') ? (
-    <div className="fixed top-0 left-0 right-0 bg-[#141414] text-white p-2 text-center text-[10px] font-bold z-[100000] shadow-lg whitespace-nowrap">
-      🚀 FIRESTORE 할당량 초과: 무제한 실시간 서버(Socket.io)로 자동 전환되었습니다.
-    </div>
-  ) : null;
-
   if (mode === 'choice') {
     return (
       <div className="min-h-screen bg-[#E4E3E0] flex flex-col items-center justify-center p-6 font-sans">
-        {quotaBanner}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1009,15 +866,6 @@ if __name__ == "__main__":
   }
 
   const togglePip = async () => {
-    if (isInIframe()) {
-      const url = new URL(window.location.href);
-      url.searchParams.set('autoPip', 'true');
-      window.open(url.toString(), '_blank');
-      setIsCompact(true);
-      addLog("새 창에서 미니 모드를 실행 중입니다...");
-      return;
-    }
-
     if ('documentPictureInPicture' in window) {
       try {
         // @ts-ignore
@@ -1054,7 +902,6 @@ if __name__ == "__main__":
         pipWindow.addEventListener('pagehide', () => {
           setPipWindow(null);
           setIsCompact(false);
-          setIsAutoPipTriggered(false);
         });
       } catch (err) {
         console.error('PiP failed', err);
@@ -1076,7 +923,6 @@ if __name__ == "__main__":
     // Render Compact UI (for normal floating or PiP)
     const renderCompactUI = () => (
       <div className={`${pipWindow ? 'w-full h-full p-4' : 'fixed bottom-4 right-4 w-80 z-[10000] border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'} bg-white flex flex-col overflow-hidden`}>
-        {quotaBanner}
         <div className="bg-[#141414] text-white p-2 flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -1088,29 +934,13 @@ if __name__ == "__main__":
             </button>
           )}
         </div>
-        <div className="p-3 space-y-2 flex-1 flex flex-col overflow-hidden">
-          <div className="flex gap-1 shrink-0">
-            <button 
-              onClick={downloadHelper}
-              className="flex-1 bg-blue-600 text-white text-[9px] py-1 font-bold rounded hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1"
-            >
-              <Download className="w-2.5 h-2.5" />
-              헬퍼 받기
-            </button>
-            <button 
-              onClick={copyPythonCommand}
-              className="flex-1 bg-gray-800 text-white text-[9px] py-1 font-bold rounded hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-1"
-            >
-              <Copy className="w-2.5 h-2.5" />
-              설치명령 복사
-            </button>
-          </div>
-          <div className="relative flex-1 min-h-0">
+        <div className="p-3 space-y-3 flex-1 flex flex-col">
+          <div className="relative flex-1">
             <textarea 
               value={getDisplayText()}
               readOnly
               onClick={copyToClipboard}
-              className="w-full h-full p-2 text-base font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
+              className="w-full h-full min-h-[200px] p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
               placeholder="Typing..."
             />
             <AnimatePresence>
@@ -1150,8 +980,7 @@ if __name__ == "__main__":
     if (pipWindow) {
       const pipRoot = pipWindow.document.getElementById('pip-root');
       return (
-        <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-12 relative overflow-hidden">
-          {quotaBanner}
+        <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-12">
           <div className="text-center space-y-4">
             <motion.div 
               initial={{ scale: 0.9 }}
@@ -1160,12 +989,12 @@ if __name__ == "__main__":
             >
               <Monitor className="w-10 h-10" />
             </motion.div>
-            <h2 className="text-3xl font-bold tracking-tight">미니 모드가 실행 중입니다</h2>
-            <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 미니 창이 떠 있을 거예요!</p>
+            <h2 className="text-3xl font-bold tracking-tight">화면이 분리되었습니다</h2>
+            <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 창이 떠 있을 거예요!</p>
             <div className="pt-8">
               <button onClick={() => pipWindow.close()} className="px-8 py-3 bg-[#141414] text-white rounded-xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center gap-2 mx-auto">
                 <Monitor className="w-5 h-5" />
-                메인화면으로 돌아가기
+                메인 화면으로 합치기
               </button>
             </div>
           </div>
@@ -1179,32 +1008,7 @@ if __name__ == "__main__":
     }
 
     return (
-      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans relative">
-        {quotaBanner}
-        {isAutoPipTriggered && !pipWindow && (
-          <div className="fixed inset-0 bg-black/60 z-[10001] flex items-center justify-center p-6 backdrop-blur-sm">
-            <div className="bg-white p-8 rounded-2xl shadow-2xl text-center max-w-xs w-full border-4 border-blue-600">
-              <motion.div
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-                className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4"
-              >
-                <Monitor className="w-8 h-8 text-blue-600" />
-              </motion.div>
-              <h3 className="text-xl font-bold mb-4">미니 모드 준비 완료</h3>
-              <p className="text-sm text-gray-500 mb-6">보안 정책상 버튼을 눌러야<br/>미니 창이 활성화됩니다.</p>
-              <button 
-                onClick={() => {
-                  setIsAutoPipTriggered(false); // Clear the overlay intent
-                  togglePip();
-                }}
-                className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all text-lg"
-              >
-                미니 모드 시작하기
-              </button>
-            </div>
-          </div>
-        )}
+      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Main Display */}
           <div className="lg:col-span-8 space-y-6">
@@ -1224,12 +1028,6 @@ if __name__ == "__main__":
                     새로고침
                   </button>
                   <button 
-                    onClick={() => setMode('choice')}
-                    className="px-2 py-1 border border-red-200 text-red-600 text-[10px] uppercase font-bold hover:bg-red-50 transition-colors"
-                  >
-                    초기화면
-                  </button>
-                  <button 
                     onClick={() => {
                       emitEvent('keypress', { char: '!' });
                       setTimeout(() => emitEvent('command', { cmd: 'backspace' }), 500);
@@ -1247,10 +1045,9 @@ if __name__ == "__main__":
                   <button 
                     onClick={togglePip} 
                     className="px-2 py-1 bg-blue-600 text-white text-[10px] uppercase font-bold hover:bg-blue-700 transition-colors rounded flex items-center gap-1"
-                    title={isInIframe() ? "새 창에서 열어야 미니 모드(PiP) 기능을 쓸 수 있습니다." : "화면 구석에 작은 창으로 띄우기"}
                   >
                     <ExternalLink className="w-3 h-3" />
-                    미니 모드
+                    미니 모드 (PiP)
                   </button>
                 </div>
               </div>
@@ -1326,10 +1123,9 @@ if __name__ == "__main__":
                   <ol className="list-decimal list-inside space-y-2">
                     <li><a href="https://www.python.org/downloads/" target="_blank" rel="noreferrer" className="underline text-blue-300">Python</a>이 설치되어 있어야 합니다.</li>
                     <li>아래 <b>'도우미 파일 다운로드'</b>를 눌러 파일을 받으세요.</li>
-                    <li>파일이 있는 폴더에서 터미널(CMD)을 엽니다.</li>
-                    <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣어 필요한 라이브러리를 먼저 설치하세요.</li>
-                    <li>이제 `python cheonjiin_helper.py` 명령어로 실행한 후 룸번호를 입력하세요.</li>
-                    <li className="text-red-400 font-bold not-italic">Mac 사용자 필독: 만약 키보드 입력이 안 된다면 [시스템 설정 &gt; 개인정보 보호 및 보안 &gt; 손쉬운 사용]에서 터미널(Terminal)을 허용해 주세요.</li>
+                    <li>파일이 있는 폴더에서 터미널을 엽니다.</li>
+                    <li>위의 <b>'설치 명령어 복사'</b>를 누르고 터미널에 붙여넣으세요.</li>
+                    <li>이제 룸번호가 바뀌어도 터미널에서 <b>직접 입력</b>해 연결할 수 있습니다!</li>
                     <li className="text-xs text-gray-500">팁: 카카오톡 잠금화면 등에서는 숫자 패드를 직접 클릭하거나 핸드폰의 숫자 모드로 입력하세요.</li>
                   </ol>
                   <div className="pt-4">
@@ -1375,16 +1171,12 @@ if __name__ == "__main__":
               <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">연결이 안 되나요? (해결 방법)</h3>
               <div className="space-y-4 text-xs text-gray-600">
                 <div className="p-3 bg-red-50 border border-red-100 rounded">
-                  <p className="font-bold text-red-800 mb-1">여기에 타이핑이 안 되나요? (Checklist):</p>
-                  <ul className="list-decimal list-inside space-y-1">
-                    <li><b>룸 번호 일치 확인:</b> 핸드폰 상단에 <span className="font-mono bg-white px-1">ROOM: {roomId}</span>가 똑같이 떠 있는지 확인하세요.</li>
-                    <li><b>모드 확인:</b> 핸드폰이 'Sender(송신)' 모드여야 합니다 (QR 스캔 시 자동 설정).</li>
-                    <li><b>사이트 권함:</b> 핸드폰 브라우저에서 '네트워크 권한' 또는 '자이로스코프(마우스용)' 권한을 물으면 허용해 주세요.</li>
+                  <p className="font-bold text-red-800 mb-1">초록불이 안 들어올 때:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>인터넷 연결을 확인하고 <b>새로고침</b> 버튼을 눌러주세요.</li>
+                    <li>공공 와이파이나 회사 보안망에서는 차단될 수 있습니다.</li>
+                    <li>브라우저를 껐다 켜보거나 다른 브라우저(크롬 등)를 써보세요.</li>
                   </ul>
-                </div>
-                <div className="p-3 bg-green-50 border border-green-100 rounded">
-                  <p className="font-bold text-green-800 mb-1">메모장/카톡에 직접 쓰고 싶다면?</p>
-                  <p>화면 중앙의 <b>'도우미 파일 다운로드'</b>를 노트북에서 실행해야 합니다. 브라우저 밖의 프로그램에 글자를 넣어주는 역할을 합니다.</p>
                 </div>
                 <div className="p-3 bg-blue-50 border border-blue-100 rounded">
                   <p className="font-bold text-blue-800 mb-1">방 코드가 무엇인가요?</p>
@@ -1416,16 +1208,15 @@ if __name__ == "__main__":
       const dx = touch.clientX - mouseRef.current.x;
       const dy = touch.clientY - mouseRef.current.y;
       
-      // Even faster tracking - 25ms (40 times per second)
-      if (now - lastMouseMoveTime.current > 25) {
-        emitEvent('mouse-move', { dx: dx * mouseSensitivity * 1.5, dy: dy * mouseSensitivity * 1.5 });
+      // Throttle mouse moves to 20ms for better responsiveness
+      if (now - lastMouseMoveTime.current > 20) {
+        emitEvent('mouse-move', { dx: dx * mouseSensitivity, dy: dy * mouseSensitivity });
         lastMouseMoveTime.current = now;
       }
     }
     mouseRef.current = { x: touch.clientX, y: touch.clientY };
   };
 
-  // Air Mouse (Gyroscope) Logic
   const handleTouchEnd = () => {
     mouseRef.current = { x: 0, y: 0 };
   };
@@ -1520,7 +1311,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-28 shrink-0">
+            <div className="bg-black p-1 pb-6 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
@@ -1661,9 +1452,7 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
                       <button
                         key={key.id}
-                        onPointerDown={() => handlePointerDown(key.id)}
-                        onPointerUp={() => handlePointerUp(key.id)}
-                        onPointerLeave={handlePointerLeave}
+                        onClick={() => handleKeyClick(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1687,9 +1476,7 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
                       <button
                         key={key.id}
-                        onPointerDown={() => handlePointerDown(key.id)}
-                        onPointerUp={() => handlePointerUp(key.id)}
-                        onPointerLeave={handlePointerLeave}
+                        onClick={() => handleKeyClick(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1709,9 +1496,7 @@ if __name__ == "__main__":
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
                       <button
                         key={key.id}
-                        onPointerDown={() => handlePointerDown(key.id)}
-                        onPointerUp={() => handlePointerUp(key.id)}
-                        onPointerLeave={handlePointerLeave}
+                        onClick={() => handleKeyClick(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1745,9 +1530,7 @@ if __name__ == "__main__":
                       </button>
                     </div>
                     <button 
-                      onPointerDown={() => handlePointerDown('0')}
-                      onPointerUp={() => handlePointerUp('0')}
-                      onPointerLeave={handlePointerLeave}
+                      onClick={() => handleKeyClick('0')}
                       className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>

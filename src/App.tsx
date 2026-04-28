@@ -136,6 +136,7 @@ export default function App() {
   const [pipWindow, setPipWindow] = useState<any>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(380); // Default keyboard height
+  const isTouching = useRef(false);
   
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -634,15 +635,14 @@ export default function App() {
     }
   };
 
-  const lastEventTime = useRef(0);
   const handleKeyPressStart = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    // Prevent double triggers from touch/mouse emulation
-    const now = Date.now();
-    if (now - lastEventTime.current < 40) return;
-    lastEventTime.current = now;
-
-    if (e && 'touches' in e && e.cancelable) {
-      e.preventDefault();
+    // Prevent mouse emulation on touch devices to stop double-typing
+    if (e && 'touches' in e) {
+      if (e.cancelable) e.preventDefault();
+      isTouching.current = true;
+    } else if (isTouching.current) {
+      // Ignore mouse events if we just had a touch event
+      return;
     }
 
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -655,17 +655,27 @@ export default function App() {
   };
 
   const handleKeyPressEnd = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
-    // Avoid double processing on end
+    if (e && 'touches' in e) {
+      // isTouching remains true
+    } else if (isTouching.current && (!e || !('touches' in e))) {
+      return;
+    }
+
+    // Process the click
     if (longPressTimer.current) {
-      // It was a short click
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
       handleKeyClick(keyId, false);
     }
-    if (e && 'touches' in e && e.cancelable) {
-      e.preventDefault();
-    }
   };
+
+  // Reset isTouching on a timer or global move to eventually allow mouse if needed
+  useEffect(() => {
+    const resetTouch = () => {
+      // We don't reset isTouching because we want to stick to one mode per session
+    };
+    window.addEventListener('touchstart', () => { isTouching.current = true; }, { passive: true });
+  }, []);
 
   const generateRoom = async () => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -897,8 +907,7 @@ if __name__ == "__main__":
     window.history.pushState({}, '', window.location.origin + window.location.pathname);
   };
 
-  if (mode === 'choice') {
-    return (
+  const renderChoice = () => (
       <div className="min-h-screen bg-[#E4E3E0] flex flex-col items-center justify-center p-6 font-sans">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -952,8 +961,7 @@ if __name__ == "__main__":
           </div>
         </motion.div>
       </div>
-    );
-  }
+  );
 
   const togglePip = async () => {
     // Check if we are in an iframe
@@ -1032,7 +1040,7 @@ if __name__ == "__main__":
     }
   };
 
-  if (mode === 'receiver') {
+  const renderReceiver = () => {
     const getBaseUrl = () => {
       const url = new URL(window.location.href);
       return url.origin + url.pathname;
@@ -1151,7 +1159,7 @@ if __name__ == "__main__":
     }
 
     return (
-      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans">
+      <div className="min-h-screen bg-[#E4E3E0] p-4 md:p-12 font-sans overflow-auto">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Main Display */}
           <div className="lg:col-span-8 space-y-6">
@@ -1346,7 +1354,7 @@ if __name__ == "__main__":
         </div>
       </div>
     );
-  }
+  };
 
   // Sender (Mobile Keyboard)
   const handleTouchMove = (e: any) => {
@@ -1371,8 +1379,7 @@ if __name__ == "__main__":
     mouseRef.current = { x: 0, y: 0 };
   };
 
-  if (hasError) {
-    return (
+  const renderError = () => (
       <div className="min-h-screen bg-red-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="bg-white p-8 rounded-2xl shadow-xl border border-red-200 max-w-sm">
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1391,8 +1398,11 @@ if __name__ == "__main__":
           </div>
         </div>
       </div>
-    );
-  }
+  );
+
+  if (hasError) return renderError();
+  if (mode === 'choice') return renderChoice();
+  if (mode === 'receiver') return renderReceiver();
 
   return (
     <div className="fixed inset-0 min-h-screen h-screen-fix bg-[#F2F2F2] flex flex-col font-sans text-[#1c1d21] overflow-hidden select-none touch-none">
@@ -1586,11 +1596,11 @@ if __name__ == "__main__":
                     {['q','w','e','r','t','y','u','i','o','p'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={() => handleKeyPressStart(k)}
-                        onMouseUp={() => handleKeyPressEnd(k)}
-                        onMouseLeave={() => handleKeyPressEnd(k, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                        onTouchEnd={() => handleKeyPressEnd(k)}
+                        onMouseDown={(e) => handleKeyPressStart(k, e)}
+                        onMouseUp={(e) => handleKeyPressEnd(k, e)}
+                        onMouseLeave={(e) => handleKeyPressEnd(k, e)}
+                        onTouchStart={(e) => handleKeyPressStart(k, e)}
+                        onTouchEnd={(e) => handleKeyPressEnd(k, e)}
                         className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                       >{k}</button>
                     ))}
@@ -1600,11 +1610,11 @@ if __name__ == "__main__":
                     {['a','s','d','f','g','h','j','k','l'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={() => handleKeyPressStart(k)}
-                        onMouseUp={() => handleKeyPressEnd(k)}
-                        onMouseLeave={() => handleKeyPressEnd(k, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                        onTouchEnd={() => handleKeyPressEnd(k)}
+                        onMouseDown={(e) => handleKeyPressStart(k, e)}
+                        onMouseUp={(e) => handleKeyPressEnd(k, e)}
+                        onMouseLeave={(e) => handleKeyPressEnd(k, e)}
+                        onTouchStart={(e) => handleKeyPressStart(k, e)}
+                        onTouchEnd={(e) => handleKeyPressEnd(k, e)}
                         className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                       >{k}</button>
                     ))}
@@ -1621,11 +1631,11 @@ if __name__ == "__main__":
                       {['z','x','c','v','b','n','m'].map(k => (
                         <button 
                           key={k} 
-                          onMouseDown={() => handleKeyPressStart(k)}
-                          onMouseUp={() => handleKeyPressEnd(k)}
-                          onMouseLeave={() => handleKeyPressEnd(k, true)}
-                          onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                          onTouchEnd={() => handleKeyPressEnd(k)}
+                          onMouseDown={(e) => handleKeyPressStart(k, e)}
+                          onMouseUp={(e) => handleKeyPressEnd(k, e)}
+                          onMouseLeave={(e) => handleKeyPressEnd(k, e)}
+                          onTouchStart={(e) => handleKeyPressStart(k, e)}
+                          onTouchEnd={(e) => handleKeyPressEnd(k, e)}
                           className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
                         >{k}</button>
                       ))}

@@ -433,7 +433,7 @@ export default function App() {
         });
         setLastSentDisplay(newText);
       }
-    }, 40); 
+    }, 20); 
 
     return () => clearTimeout(timeout);
   }, [inputState, mode, roomId, isConnected]);
@@ -631,7 +631,7 @@ export default function App() {
     // repeat after delay
     backspaceInterval.current = setInterval(() => {
       handleInput('backspace', true);
-    }, 180); // Slightly slower for better control
+    }, 150); // Faster repeat for better feel
   };
 
   const stopBackspace = () => {
@@ -710,7 +710,7 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.01
+pyautogui.PAUSE = 0.005
 pyautogui.FAILSAFE = True
 
 # Global variables
@@ -731,19 +731,19 @@ def process_event(event_data):
             print(f" [-] Backspace x{delete_count}")
             for _ in range(delete_count):
                 pyautogui.press('backspace', _pause=False)
-            time.sleep(0.01)
+            time.sleep(0.005)
         
         # 2. Perform inserts
         if insert_text:
             print(f" [+] Typing: {insert_text}")
             # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
-            time.sleep(0.02) # Delay for clipboard stability
+            time.sleep(0.01) # Faster clipboard delay
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.01)
+            time.sleep(0.005)
                 
     elif etype == 'command':
         cmd = edata.get('cmd')
@@ -1459,26 +1459,24 @@ if __name__ == "__main__":
                 </div>
               </div>
 
-            {/* Galaxy Style Keyboard - Dark Theme */}
+            {/* Premium Modern Keyboard */}
             <div 
-              className="bg-black p-1 pb-6 shrink-0 transition-transform duration-200 ease-out"
+              className="bg-[#000000] p-2 pb-8 shrink-0 transition-transform duration-200 ease-out border-t border-white/5"
               style={{ transform: `translateY(${keyboardOffset}px)` }}
             >
               {inputMode === 'sym' ? (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-2">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
-                    <div key={rowIndex} className="flex gap-1">
+                    <div key={rowIndex} className="flex gap-1.5 h-12">
                       {row.map((key, keyIndex) => {
                         if (key === 'backspace') {
                           return (
                             <button 
                               key={key}
-                              onMouseDown={(e) => startBackspace(e)}
-                              onMouseUp={stopBackspace}
-                              onMouseLeave={stopBackspace}
-                              onTouchStart={(e) => startBackspace(e)}
-                              onTouchEnd={stopBackspace}
-                              className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center active:bg-[#4A4A4C]"
+                              onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
+                              onPointerUp={stopBackspace}
+                              onPointerLeave={stopBackspace}
+                              className="w-[15%] bg-[#3A3A3C] rounded-xl flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                             >
                               <Delete className="w-5 h-5 text-white" />
                             </button>
@@ -1486,51 +1484,37 @@ if __name__ == "__main__":
                         }
                         if (key === 'ABC') {
                           return (
-                            <button key={key} onClick={() => setInputMode('en')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">ABC</button>
+                            <button key={key} onPointerDown={() => setInputMode('en')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex items-center justify-center text-white text-xs font-bold active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]">ABC</button>
                           );
                         }
                         if (key === 'mode') {
                           return (
-                            <button key={key} onClick={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex flex-col items-center justify-center text-white text-[8px] font-bold leading-tight">
+                            <button key={key} onPointerDown={() => handleKeyClick('mode')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex flex-col items-center justify-center text-white text-[9px] font-bold leading-tight active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]">
                               <span>한</span>
-                              <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
-                              <span className="ml-1.5">영</span>
+                              <div className="w-3.5 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
+                              <span className="ml-1">영</span>
                             </button>
                           );
                         }
                         if (key === 'space') {
                           return (
-                            <button key={key} onClick={() => handleKeyClick('space')} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center">
-                              <div className="w-16 h-1 bg-white/20 rounded-full"></div>
+                            <button key={key} onPointerDown={() => handleKeyClick('space')} className="flex-1 bg-[#2C2C2E] rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]">
+                              <div className="w-12 h-1 bg-white/30 rounded-full"></div>
                             </button>
                           );
                         }
                         if (key === 'enter') {
                           return (
-                            <button key={key} onClick={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center">
+                            <button key={key} onPointerDown={() => handleKeyClick('enter')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]">
                               <CornerDownLeft className="w-5 h-5 text-white" />
                             </button>
-                          );
-                        }
-                        if (key === '1/2') {
-                          return (
-                            <button key={key} onClick={() => setSymbolPage(2)} className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">1/2</button>
-                          );
-                        }
-                        if (key === '2/2') {
-                          return (
-                            <button key={key} onClick={() => setSymbolPage(1)} className="w-[12%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">2/2</button>
                           );
                         }
                         return (
                           <button
                             key={keyIndex}
-                            onMouseDown={() => handleKeyPressStart(key)}
-                            onMouseUp={() => handleKeyPressEnd(key)}
-                            onMouseLeave={() => handleKeyPressEnd(key, true)}
-                            onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key); }}
-                            onTouchEnd={() => handleKeyPressEnd(key)}
-                            className={`flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]`}
+                            onPointerDown={() => handleKeyClick(key)}
+                            className="flex-1 bg-[#2C2C2E] rounded-xl flex items-center justify-center text-white text-lg font-medium active:bg-[#3A3A3C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                           >
                             {key}
                           </button>
@@ -1540,44 +1524,40 @@ if __name__ == "__main__":
                   ))}
                 </div>
               ) : inputMode === 'en' ? (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 px-0.5">
                   {/* Row 1: Numbers */}
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 h-10">
                     {['1','2','3','4','5','6','7','8','9','0'].map(k => (
-                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]">{k}</button>
+                      <button key={k} onPointerDown={() => handleKeyClick(k)} className="flex-1 bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-sm font-medium active:bg-[#3A3A3C] transition-all">{k}</button>
                     ))}
                   </div>
                   {/* Row 2: QWERTY */}
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 h-12">
                     {['q','w','e','r','t','y','u','i','o','p'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={() => handleKeyPressStart(k)}
-                        onMouseUp={() => handleKeyPressEnd(k)}
-                        onMouseLeave={() => handleKeyPressEnd(k, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                        onTouchEnd={() => handleKeyPressEnd(k)}
-                        className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                        onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
+                        onPointerUp={() => handleKeyPressEnd(k)}
+                        onPointerLeave={() => handleKeyPressEnd(k, true)}
+                        className="flex-1 bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-lg font-medium uppercase active:bg-[#3A3A3C] shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all"
                       >{k}</button>
                     ))}
                   </div>
                   {/* Row 3: ASDF */}
-                  <div className="flex gap-1 px-[5%]">
+                  <div className="flex gap-1 h-12 px-[4%]">
                     {['a','s','d','f','g','h','j','k','l'].map(k => (
                       <button 
                         key={k} 
-                        onMouseDown={() => handleKeyPressStart(k)}
-                        onMouseUp={() => handleKeyPressEnd(k)}
-                        onMouseLeave={() => handleKeyPressEnd(k, true)}
-                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                        onTouchEnd={() => handleKeyPressEnd(k)}
-                        className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                        onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
+                        onPointerUp={() => handleKeyPressEnd(k)}
+                        onPointerLeave={() => handleKeyPressEnd(k, true)}
+                        className="flex-1 bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-lg font-medium uppercase active:bg-[#3A3A3C] shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all"
                       >{k}</button>
                     ))}
                   </div>
                   {/* Row 4: Shift, ZXCV, Backspace */}
-                  <div className="flex gap-1">
-                    <button onClick={() => handleKeyClick('shift')} className={`w-[13%] h-10 rounded-md flex items-center justify-center transition-colors ${shiftState === 2 ? 'bg-white text-blue-600' : shiftState === 1 ? 'bg-white text-black' : 'bg-[#3A3A3C] text-white'}`}>
+                  <div className="flex gap-1 h-12">
+                    <button onPointerDown={() => handleKeyClick('shift')} className={`w-[12%] rounded-xl flex items-center justify-center transition-all active:scale-95 ${shiftState === 2 ? 'bg-white text-blue-600' : shiftState === 1 ? 'bg-white text-black' : 'bg-[#3A3A3C] text-white'}`}>
                       <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
                         <path d="M12 4l-8 8h5v8h6v-8h5z"/>
                         {shiftState === 2 && <rect x="4" y="2" width="16" height="2" />}
@@ -1587,129 +1567,125 @@ if __name__ == "__main__":
                       {['z','x','c','v','b','n','m'].map(k => (
                         <button 
                           key={k} 
-                          onMouseDown={() => handleKeyPressStart(k)}
-                          onMouseUp={() => handleKeyPressEnd(k)}
-                          onMouseLeave={() => handleKeyPressEnd(k, true)}
-                          onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
-                          onTouchEnd={() => handleKeyPressEnd(k)}
-                          className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                          onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
+                          onPointerUp={() => handleKeyPressEnd(k)}
+                          onPointerLeave={() => handleKeyPressEnd(k, true)}
+                          className="flex-1 bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-lg font-medium uppercase active:bg-[#3A3A3C] shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all"
                         >{k}</button>
                       ))}
                     </div>
                     <button 
-                      onMouseDown={(e) => startBackspace(e)}
-                      onMouseUp={stopBackspace}
-                      onMouseLeave={stopBackspace}
-                      onTouchStart={(e) => startBackspace(e)}
-                      onTouchEnd={stopBackspace}
-                      className="w-[13%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center active:bg-[#4A4A4C]"
+                      onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
+                      onPointerUp={stopBackspace}
+                      onPointerLeave={stopBackspace}
+                      className="w-[12%] bg-[#3A3A3C] rounded-xl flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
                     >
                       <Delete className="w-5 h-5 text-white" />
                     </button>
                   </div>
                   {/* Row 5: Bottom Bar */}
-                  <div className="flex gap-1">
-                    <button onClick={() => setInputMode('sym')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center text-white text-xs font-bold">!#1</button>
-                    <button onClick={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex flex-col items-center justify-center text-white text-[8px] font-bold leading-tight">
+                  <div className="flex gap-1.5 mt-0.5 h-12">
+                    <button onPointerDown={() => setInputMode('sym')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex items-center justify-center text-white text-sm font-bold active:scale-95 transition-all">!#1</button>
+                    <button onPointerDown={() => handleKeyClick('mode')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex flex-col items-center justify-center text-white text-[9px] font-bold leading-tight active:scale-95 transition-all">
                       <span>한</span>
                       <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
-                      <span className="ml-1.5">영</span>
+                      <span className="ml-1">영</span>
                     </button>
-                    <button onClick={() => handleKeyClick(',')} className="w-[10%] h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-lg font-bold">,</button>
-                    <button onClick={() => handleKeyClick('space')} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center">
-                      <div className="w-16 h-1 bg-white/20 rounded-full"></div>
+                    <button onPointerDown={() => handleKeyClick(',')} className="w-[10%] bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-lg font-bold shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all">,</button>
+                    <button onPointerDown={() => handleKeyClick('space')} className="flex-1 bg-[#2C2C2E] rounded-xl flex items-center justify-center shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all">
+                      <div className="w-16 h-1 bg-white/30 rounded-full"></div>
                     </button>
-                    <button onClick={() => handleKeyClick('.')} className="w-[10%] h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-lg font-bold">.</button>
-                    <button onClick={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#3A3A3C] rounded-md flex items-center justify-center">
-                      <CornerDownLeft className="w-5 h-5 text-white" />
+                    <button onPointerDown={() => handleKeyClick('.')} className="w-[10%] bg-[#2C2C2E] rounded-lg flex items-center justify-center text-white text-lg font-bold shadow-[0_2px_0_0_rgba(255,255,255,0.03)] active:translate-y-[1px] active:shadow-none transition-all">.</button>
+                    <button onPointerDown={() => handleKeyClick('enter')} className="w-[15%] bg-[#3A3A3C] rounded-xl flex items-center justify-center active:scale-95 transition-all">
+                      <CornerDownLeft className="w-6 h-6 text-white" />
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-2.5">
                   {/* Row 1 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
                       <button
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                        className="h-16 bg-[#2C2C2E] rounded-xl flex flex-col items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all relative overflow-hidden group shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                       >
-                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
-                        <span className="text-xl font-bold text-white">{key.label}</span>
+                        <span className="absolute top-1 right-2 text-[9px] font-bold text-[#8E8E93] group-active:text-[#AEAEB2]">{key.id}</span>
+                        <span className="text-2xl font-bold text-white tracking-wide">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                       onPointerUp={stopBackspace}
                       onPointerLeave={stopBackspace}
-                      className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
+                      className="h-16 bg-[#3A3A3C] rounded-xl flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
-                      <Delete className="w-6 h-6 text-white" />
+                      <Delete className="w-6 h-6 text-[#E5E5EA]" />
                     </button>
                   </div>
 
                   {/* Row 2 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
                       <button
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                        className="h-16 bg-[#2C2C2E] rounded-xl flex flex-col items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all relative overflow-hidden group shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                       >
-                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
-                        <span className="text-xl font-bold text-white">{key.label}</span>
+                        <span className="absolute top-1 right-2 text-[9px] font-bold text-[#8E8E93] group-active:text-[#AEAEB2]">{key.id}</span>
+                        <span className="text-2xl font-bold text-white tracking-wide">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('enter')}
-                      className="h-16 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all"
+                      className="h-16 bg-[#3A3A3C] rounded-xl flex items-center justify-center active:bg-[#4A4A4C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
-                      <CornerDownLeft className="w-6 h-6 text-white" />
+                      <CornerDownLeft className="w-6 h-6 text-[#E5E5EA]" />
                     </button>
                   </div>
 
                   {/* Row 3 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
                       <button
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                        className="h-16 bg-[#2C2C2E] rounded-xl flex flex-col items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all relative overflow-hidden group shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                       >
-                        <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
-                        <span className="text-xl font-bold text-white">{key.label}</span>
+                        <span className="absolute top-1 right-2 text-[9px] font-bold text-[#8E8E93] group-active:text-[#AEAEB2]">{key.id}</span>
+                        <span className="text-2xl font-bold text-white tracking-wide">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('punct')}
-                      className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all text-xl font-bold text-white"
+                      className="h-16 bg-[#2C2C2E] rounded-xl flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all text-xl font-bold text-white shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
                       .,?!
                     </button>
                   </div>
 
                   {/* Row 4 */}
-                  <div className="grid grid-cols-4 gap-1.5 h-16">
-                    <div className="flex gap-1">
+                  <div className="grid grid-cols-4 gap-2 h-16">
+                    <div className="flex gap-1.5">
                       <button 
                         onPointerDown={() => setInputMode('sym')}
-                        className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-sm font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
+                        className="flex-1 bg-[#3A3A3C] rounded-xl flex items-center justify-center text-sm font-bold text-white active:bg-[#4A4A4C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                       >
                         !#1
                       </button>
                       <button 
                         onPointerDown={() => handleKeyClick('mode')}
-                        className="flex-1 bg-[#3A3A3C] rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95 leading-tight"
+                        className="flex-1 bg-[#3A3A3C] rounded-xl flex flex-col items-center justify-center text-[9px] font-bold text-white active:bg-[#4A4A4C] active:scale-95 transition-all leading-tight shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                       >
                         <span>한</span>
-                        <div className="w-3 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
+                        <div className="w-3.5 h-[1px] bg-white/30 my-0.5 rotate-[-45deg]"></div>
                         <span className="ml-1">영</span>
                       </button>
                     </div>
@@ -1717,20 +1693,20 @@ if __name__ == "__main__":
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart('0'); }}
                       onPointerUp={() => handleKeyPressEnd('0')}
                       onPointerLeave={() => handleKeyPressEnd('0', true)}
-                      className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
+                      className="bg-[#2C2C2E] rounded-xl flex flex-col items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all relative overflow-hidden group shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
-                      <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>
-                      <span className="text-xl font-bold text-white">ㅇㅁ</span>
+                      <span className="absolute top-1 right-2 text-[9px] font-bold text-[#8E8E93] group-active:text-[#AEAEB2]">0</span>
+                      <span className="text-2xl font-bold text-white">ㅇㅁ</span>
                     </button>
                     <button 
                       onPointerDown={() => handleKeyClick('space')}
-                      className="bg-[#2C2C2E] rounded-xl shadow-sm flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all"
+                      className="bg-[#2C2C2E] rounded-xl flex items-center justify-center active:bg-[#3A3A3C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
-                      <div className="w-10 h-1 bg-white/20 rounded-full"></div>
+                      <div className="w-12 h-1 bg-white/30 rounded-full"></div>
                     </button>
                     <button 
                       onPointerDown={() => sendCommand('clear')}
-                      className="bg-[#3A3A3C] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-white active:bg-[#4A4A4C] transition-all active:scale-95"
+                      className="bg-[#3A3A3C] rounded-xl flex items-center justify-center text-xs font-bold text-[#E5E5EA] active:bg-[#4A4A4C] active:scale-95 transition-all shadow-[0_2px_0_0_rgba(255,255,255,0.05)]"
                     >
                       한자
                     </button>

@@ -280,6 +280,8 @@ export default function App() {
     });
     socketRef.current = socket;
 
+    let lastProcessedSeq = -1;
+
     socket.on('connect', () => {
       addLog(`Connected via ${socket.io.engine.transport.name}`);
       console.log('Socket Connected:', socket.id);
@@ -302,6 +304,10 @@ export default function App() {
 
     socket.on('remote-event', (event) => {
       if (mode === 'receiver') {
+        const seq = event.seq ?? -1;
+        if (seq <= lastProcessedSeq && seq !== -1) return;
+        lastProcessedSeq = seq;
+
         if (event.type === 'mousemove' || event.type === 'mouse-move') {
           const dx = event.data.dx || 0;
           const dy = event.data.dy || 0;
@@ -312,6 +318,13 @@ export default function App() {
         } else if (event.type === 'click' || event.type === 'mouse-click') {
           const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
           if (el instanceof HTMLElement) el.click();
+        } else if (event.type === 'sync-text') {
+          const { deleteCount, insertText } = event.data;
+          setInputState(prev => ({
+            ...prev,
+            committedText: (prev.committedText || '').slice(0, -(deleteCount || 0)) + (insertText || ''),
+            composition: [] // sync-text usually commits composition
+          }));
         }
       }
       
@@ -330,10 +343,10 @@ export default function App() {
   }, [roomId, mode]);
 
   // REST Polling Fallback for Receiver (Ensures it works even if Socket.io is blocked)
+  const lastPolledSeqRef = useRef(-1);
   useEffect(() => {
     if (mode !== 'receiver' || !roomId || !isConnected) return;
     
-    let lastPolledSeq = -1;
     const poll = async () => {
       try {
         const response = await fetch(`/api/events/${roomId}?since=${Date.now() - 10000}`);
@@ -341,8 +354,8 @@ export default function App() {
         const events = await response.json();
         
         events.forEach((event: any) => {
-          if (event.seq > lastPolledSeq) {
-            lastPolledSeq = event.seq;
+          if (event.seq > lastPolledSeqRef.current) {
+            lastPolledSeqRef.current = event.seq;
             if (event.type === 'mousemove' || event.type === 'mouse-move') {
               const dx = event.data.dx || 0;
               const dy = event.data.dy || 0;
@@ -353,13 +366,13 @@ export default function App() {
             } else if (event.type === 'click' || event.type === 'mouse-click') {
               const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
               if (el instanceof HTMLElement) el.click();
-            } else if (event.type === 'keydown' || event.type === 'key-down') {
-              const key = event.data.key;
-              if (key === 'Backspace') {
-                setText(prev => prev.slice(0, -1));
-              } else if (key?.length === 1) {
-                setText(prev => prev + key);
-              }
+            } else if (event.type === 'sync-text') {
+              const { deleteCount, insertText } = event.data;
+              setInputState(prev => ({
+                ...prev,
+                committedText: (prev.committedText || '').slice(0, -(deleteCount || 0)) + (insertText || ''),
+                composition: []
+              }));
             }
           }
         });
@@ -518,9 +531,6 @@ export default function App() {
           const assembled = Hangul.assemble(processed);
           nextCommittedText = committedText + (assembled || processed.join('')) + input;
           nextComposition = [];
-          
-          // Emit typing event for non-korean or non-composition characters
-          emitEvent('key-down', { key: input });
         }
       }
 

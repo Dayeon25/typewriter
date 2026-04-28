@@ -200,40 +200,7 @@ export default function App() {
     });
   }, [inputState, mode, roomId, isConnected]);
 
-  // Sync Input to Python via REST fallback if needed
-  useEffect(() => {
-    if (mode !== 'sender' || !roomId || !isConnected) return;
-    
-    // Batch updates to save network
-    const timeout = setTimeout(async () => {
-      const currentComposition = processCheonjiin(inputState.composition);
-      const assembled = (currentComposition.length === 1 && currentComposition[0] === 'ㆍ') 
-        ? 'ㆍ' 
-        : Hangul.assemble(currentComposition);
-      const newDisplay = inputState.committedText + assembled;
-      
-      if (newDisplay !== lastSentDisplay) {
-        let deleteCount = 0;
-        let insertText = '';
-        
-        // Find common prefix length
-        let common = 0;
-        while (common < lastSentDisplay.length && common < newDisplay.length && lastSentDisplay[common] === newDisplay[common]) {
-          common++;
-        }
-        
-        deleteCount = lastSentDisplay.length - common;
-        insertText = newDisplay.substring(common);
-        
-        if (deleteCount > 0 || insertText) {
-          await emitEvent('sync-text', { deleteCount, insertText });
-          setLastSentDisplay(newDisplay);
-        }
-      }
-    }, 20); // Reduced from 300ms to 20ms for much faster response
-
-    return () => clearTimeout(timeout);
-  }, [inputState, mode, roomId, isConnected, lastSentDisplay]);
+  // Sync State Sync via Socket is handled below in global effects
 
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -382,9 +349,9 @@ export default function App() {
     });
 
     socket.on('connect_error', (err) => {
-      addLog(`Socket unavailable: ${err.message}. Switching to HTTP polling.`);
+      console.warn(`Socket unavailable: ${err.message}. Switching to HTTP polling.`);
       setIsConnected(true); 
-      setConnectionError(null); // Clear error because we have fallback
+      setConnectionError(null); 
     });
 
     socket.on('room-sync', (data) => {
@@ -429,7 +396,7 @@ export default function App() {
       } catch (e) {}
     };
 
-    const interval = setInterval(poll, 1500);
+    const interval = setInterval(poll, 800);
     return () => clearInterval(interval);
   }, [mode, roomId, isConnected, processEvent]);
 
@@ -531,7 +498,8 @@ export default function App() {
   useEffect(() => {
     if (mode !== 'sender' || !roomId || !isConnected) return;
 
-    const currentAssembled = Hangul.assemble(processCheonjiin(inputState.composition)) || processCheonjiin(inputState.composition).join('');
+    const processed = processCheonjiin(inputState.composition);
+    const currentAssembled = (processed.length === 1 && processed[0] === 'ㆍ') ? 'ㆍ' : (Hangul.assemble(processed) || processed.join(''));
     const currentFullText = inputState.committedText + currentAssembled;
 
     if (currentFullText === lastSentDisplay) return;
@@ -1518,7 +1486,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-10 shrink-0">
+            <div className="bg-black p-1 pb-20 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

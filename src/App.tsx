@@ -125,6 +125,7 @@ export default function App() {
   const [lastChar, setLastChar] = useState<string | null>(null);
   const [tapCount, setTapCount] = useState(0);
   const tapTimer = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const backspaceInterval = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -485,8 +486,13 @@ export default function App() {
   }, [isAirMouseActive, activeTab, roomId, mouseSensitivity]);
 
   const lastClickTime = useRef(0);
-  const handleKeyClick = (keyId: string) => {
+  const handleKeyClick = (keyId: string, isLongPress: boolean = false) => {
     if (!roomId) return;
+
+    if (isLongPress && ['1','2','3','4','5','6','7','8','9','0'].includes(keyId)) {
+      handleInput(keyId);
+      return;
+    }
 
     // Debounce backspace to prevent double-deletion
     if (keyId === 'backspace') {
@@ -541,6 +547,17 @@ export default function App() {
     }
 
     if (inputMode === 'en' && keyId.length === 1) {
+      // Long press check for alphabet keys in QWERTY
+      if (isLongPress) {
+        const numMap: Record<string, string> = {
+          'q': '1', 'w': '2', 'e': '3', 'r': '4', 't': '5', 'y': '6', 'u': '7', 'i': '8', 'o': '9', 'p': '0'
+        };
+        if (numMap[keyId]) {
+          handleInput(numMap[keyId]);
+          return;
+        }
+      }
+      
       let char = keyId;
       if (shiftState > 0) {
         char = char.toUpperCase();
@@ -554,6 +571,11 @@ export default function App() {
 
     const config = KEYPAD_CONFIG.find(k => k.id === keyId);
     if (!config) return;
+
+    if (isLongPress && config.num[0]) {
+      handleInput(config.num[0]);
+      return;
+    }
 
     const chars = config[inputMode === 'sym' ? 'num' : inputMode];
     const isVowel = inputMode === 'ko' && ['1', '2', '3'].includes(keyId);
@@ -610,6 +632,25 @@ export default function App() {
     }
   };
 
+  const handleKeyPressStart = (keyId: string) => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    
+    // Set a timer for long press (600ms)
+    longPressTimer.current = setTimeout(() => {
+      handleKeyClick(keyId, true);
+      longPressTimer.current = null;
+    }, 600);
+  };
+
+  const handleKeyPressEnd = (keyId: string, wasLongPress: boolean = false) => {
+    if (longPressTimer.current) {
+      // It was a short click
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      handleKeyClick(keyId, false);
+    }
+  };
+
   const generateRoom = async () => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     setRoomId(id);
@@ -660,31 +701,13 @@ import pyperclip
 import json
 
 # Optimize pyautogui for speed
-pyautogui.PAUSE = 0.001
+pyautogui.PAUSE = 0.01
 pyautogui.FAILSAFE = True
 
 # Global variables
-room_id = '${roomId}'
 PROJECT_ID = "gen-lang-client-0554047813"
 DATABASE_ID = "ai-studio-1127c5b5-9423-4747-86d8-14fb0fe2ab2a"
 API_KEY = "AIzaSyD2wmVsk_iswMNVsvcaJrDtxLgezz6dffc"
-
-# Get room_id from command line if provided
-if len(sys.argv) > 1:
-    room_id = sys.argv[1]
-else:
-    print(f"Defaulting to Room ID from script: {room_id}")
-
-print(f"\\nMonitoring Room: {room_id}")
-print("Starting Cheonjiin Helper (v2.0 - Stabilized)...")
-print("--------------------------------------------------")
-print("1. Click the target window to start typing.")
-print("2. Type on your phone - it will sync automatically.")
-print("--------------------------------------------------")
-
-last_processed_timestamp = int(time.time() * 1000)
-session = requests.Session()
-first_run = True
 
 def process_event(event_data):
     etype = event_data.get('type')
@@ -705,6 +728,7 @@ def process_event(event_data):
             print(f" [+] Typing: {insert_text}")
             # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
+            time.sleep(0.01) # Small delay for clipboard stability
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
@@ -716,83 +740,101 @@ def process_event(event_data):
         elif cmd == 'enter': pyautogui.press('enter')
         elif cmd == 'space': pyautogui.press('space')
         elif cmd == 'clear':
-            pyautogui.hotkey('ctrl', 'a')
+            if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
+            else: pyautogui.hotkey('ctrl', 'a')
             pyautogui.press('backspace')
             
     elif etype == 'mouse-move':
         dx, dy = edata.get('dx', 0), edata.get('dy', 0)
-        # Mouse speed multiplier
         pyautogui.moveRel(dx * 2.0, dy * 2.0, duration=0.01)
         
     elif etype == 'mouse-click':
         btn = edata.get('button', 'left')
         pyautogui.click(button=btn)
 
-# Polling Query
-query_body = {
-    "structuredQuery": {
-        "from": [{"collectionId": "events"}],
-        "where": {
-            "fieldFilter": {
-                "field": {"fieldPath": "timestamp"},
-                "op": "GREATER_THAN",
-                "value": {"integerValue": last_processed_timestamp}
-            }
-        },
-        "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
+def run_helper(room_id):
+    print(f"\\n[+] Monitoring Room: {room_id}")
+    last_processed_timestamp = int(time.time() * 1000)
+    session = requests.Session()
+    first_run = True
+    
+    query_body = {
+        "structuredQuery": {
+            "from": [{"collectionId": "events"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "timestamp"},
+                    "op": "GREATER_THAN",
+                    "value": {"integerValue": last_processed_timestamp}
+                }
+            },
+            "orderBy": [{"field": {"fieldPath": "timestamp"}, "direction": "ASCENDING"}]
+        }
     }
-}
 
-print("Connected! Waiting for input...")
-
-while True:
     try:
-        query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
-        parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
-        
-        response = session.post(
-            f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
-            json=query_body,
-            timeout=5
-        )
-        
-        if response.status_code == 200:
-            results = response.json()
+        while True:
+            query_body["structuredQuery"]["where"]["fieldFilter"]["value"]["integerValue"] = last_processed_timestamp
+            parent_path = f"projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/rooms/{room_id}"
             
-            if len(results) == 1 and 'document' not in results[0]:
-                pass
-            else:
-                for res in results:
-                    doc = res.get('document')
-                    if not doc: continue
-                    
-                    fields = doc.get('fields', {})
-                    ts = int(fields.get('timestamp', {}).get('integerValue', 0))
-                    
-                    if ts > last_processed_timestamp:
-                        last_processed_timestamp = ts
-                        
-                        if not first_run:
-                            event_data = {
-                                "type": fields.get('type', {}).get('stringValue'),
-                                "data": {}
-                            }
-                            raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
-                            for k, v in raw_data.items():
-                                if 'stringValue' in v: event_data['data'][k] = v['stringValue']
-                                elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
-                                elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
-                            
-                            process_event(event_data)
-                
-            first_run = False
-        
-        time.sleep(0.01)
-        
+            response = session.post(
+                f"https://firestore.googleapis.com/v1/{parent_path}:runQuery?key={API_KEY}", 
+                json=query_body,
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                results = response.json()
+                if not results or (len(results) == 1 and 'document' not in results[0]):
+                    pass
+                else:
+                    for res in results:
+                        doc = res.get('document')
+                        if not doc: continue
+                        fields = doc.get('fields', {})
+                        ts = int(fields.get('timestamp', {}).get('integerValue', 0))
+                        if ts > last_processed_timestamp:
+                            last_processed_timestamp = ts
+                            if not first_run:
+                                try:
+                                    event_data = {"type": fields.get('type', {}).get('stringValue'), "data": {}}
+                                    raw_data = fields.get('data', {}).get('mapValue', {}).get('fields', {})
+                                    for k, v in raw_data.items():
+                                        if 'stringValue' in v: event_data['data'][k] = v['stringValue']
+                                        elif 'integerValue' in v: event_data['data'][k] = int(v['integerValue'])
+                                        elif 'doubleValue' in v: event_data['data'][k] = float(v['doubleValue'])
+                                    process_event(event_data)
+                                except Exception as e:
+                                    print(f"Error processing event: {e}")
+                first_run = False
+            elif response.status_code == 404:
+                print(f"\\n[!] 룸 {room_id}를 찾을 수 없습니다. (핸드폰이 꺼져있거나 코드가 틀림)")
+                return False
+            
+            time.sleep(0.01)
     except KeyboardInterrupt:
-        break
-    except Exception as e:
-        time.sleep(0.5)
+        print("\\n[!] 사용자에 의해 정지되었습니다.")
+        return True
+
+if __name__ == "__main__":
+    print("--------------------------------------------------")
+    print("천지인 리모트 데스크탑 도우미 (v2.1 - Enhanced)")
+    print("--------------------------------------------------")
+    
+    current_room = '${roomId}' if '${roomId}' else None
+    
+    while True:
+        if not current_room:
+            current_room = input("\\n[?] 연결할 룸 코드를 입력하세요 (예: ABCDEF): ").strip().upper()
+        
+        if not current_room: continue
+        
+        success = run_helper(current_room)
+        if success: # Manual stop
+            break
+        
+        # Room not found or error, ask for new code
+        current_room = None
 `.trim();
 
   const downloadHelper = () => {
@@ -805,6 +847,18 @@ while True:
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const resetApp = () => {
+    if (pipWindow) {
+      pipWindow.close();
+      setPipWindow(null);
+    }
+    setMode('choice');
+    setRoomId('');
+    setIsConnected(false);
+    setIsCompact(false);
+    window.history.pushState({}, '', window.location.origin + window.location.pathname);
   };
 
   if (mode === 'choice') {
@@ -866,7 +920,29 @@ while True:
   }
 
   const togglePip = async () => {
+    // Check if we are in an iframe
+    const isInIframe = () => {
+      try {
+        return window.self !== window.top;
+      } catch (e) {
+        return true;
+      }
+    };
+
     if ('documentPictureInPicture' in window) {
+      if (isInIframe()) {
+        const confirmNewTab = window.confirm(
+          'PICTURE-IN-PICTURE (미니 모드) 알림:\n\n' +
+          '현재 미리보기 탭(iframe)에서는 미니 모드를 시작할 수 없습니다. ' +
+          '브라우저 보안 정책상 상단 바의 "Open in New Tab" 버튼을 눌러 새 창에서 실행해야 합니다.\n\n' +
+          '새 탭에서 창을 여시겠습니까?'
+        );
+        if (confirmNewTab) {
+          window.open(window.location.href, '_blank');
+        }
+        return;
+      }
+
       try {
         // @ts-ignore
         const pipWindow = await window.documentPictureInPicture.requestWindow({
@@ -903,11 +979,19 @@ while True:
           setPipWindow(null);
           setIsCompact(false);
         });
-      } catch (err) {
+      } catch (err: any) {
         console.error('PiP failed', err);
-        setIsCompact(true);
+        if (err.name === 'NotAllowedError') {
+          alert('브라우저에서 창 열기 권한이 거부되었습니다.');
+        } else if (err.message?.includes('browsing context')) {
+          alert('이 환경(iframe)에서는 미니 모드를 지원하지 않습니다. 새 탭에서 열어주세요.');
+        } else {
+          alert('미니 모드 실행 중 오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'));
+        }
+        setIsCompact(false);
       }
     } else {
+      alert('사용 중인 브라우저가 Document Picture-in-Picture API를 지원하지 않습니다. (최신 Chrome 필요)');
       setIsCompact(true);
     }
   };
@@ -922,25 +1006,44 @@ while True:
 
     // Render Compact UI (for normal floating or PiP)
     const renderCompactUI = () => (
-      <div className={`${pipWindow ? 'w-full h-full p-4' : 'fixed bottom-4 right-4 w-80 z-[10000] border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'} bg-white flex flex-col overflow-hidden`}>
-        <div className="bg-[#141414] text-white p-2 flex items-center justify-between cursor-move">
+      <div className={`${pipWindow ? 'w-full h-full p-0' : 'fixed bottom-4 right-4 w-80 z-[10000] border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'} bg-white flex flex-col overflow-hidden rounded-xl`}>
+        <div className="bg-[#141414] text-white p-3 flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest">{pipWindow ? 'PiP Mode' : 'Mini Mode'}</span>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></div>
+            <span className="text-[10px] font-black uppercase tracking-tighter">Cheonjiin Remote</span>
+            <span className="text-[10px] opacity-40 font-mono">[{roomId}]</span>
           </div>
-          {!pipWindow && (
-            <button onClick={() => setIsCompact(false)} className="p-1 hover:bg-white/20 rounded">
+          <div className="flex gap-2">
+            {!pipWindow && (
+              <button onClick={() => setIsCompact(false)} className="p-1 hover:bg-white/20 rounded">
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            )}
+            {pipWindow && (
+              <button 
+                onClick={() => pipWindow.close()} 
+                className="p-1.5 hover:bg-red-500 rounded bg-white/10 transition-colors"
+                title="Close Window"
+              >
+                <CornerDownLeft className="w-3 h-3" />
+              </button>
+            )}
+            <button 
+              onClick={resetApp} 
+              className="p-1.5 hover:bg-red-500 rounded bg-white/10 transition-colors"
+              title="Exit Room"
+            >
               <RefreshCw className="w-3 h-3" />
             </button>
-          )}
+          </div>
         </div>
-        <div className="p-3 space-y-3 flex-1 flex flex-col">
+        <div className="p-4 space-y-3 flex-1 flex flex-col bg-gray-50">
           <div className="relative flex-1">
             <textarea 
               value={getDisplayText()}
               readOnly
               onClick={copyToClipboard}
-              className="w-full h-full min-h-[200px] p-3 text-lg font-medium bg-gray-50 border border-dashed border-[#141414]/20 focus:outline-none resize-none cursor-pointer hover:bg-gray-100 transition-colors"
+              className="w-full h-full min-h-[180px] p-4 text-xl font-medium bg-white border-2 border-[#141414]/10 rounded-xl focus:outline-none resize-none cursor-pointer hover:border-blue-500 transition-all font-sans leading-relaxed"
               placeholder="Typing..."
             />
             <AnimatePresence>
@@ -949,26 +1052,26 @@ while True:
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  className="absolute inset-0 flex items-center justify-center bg-blue-600/90 text-white font-bold rounded pointer-events-none text-center p-2"
+                  className="absolute inset-0 flex items-center justify-center bg-blue-600/95 text-white font-black rounded-xl pointer-events-none text-center p-2 uppercase tracking-widest text-sm"
                 >
-                  복사됨!<br/>(Ctrl+V)
+                  Copied!<br/><span className="text-[10px] opacity-70">Paste it anywhere (Ctrl+V)</span>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 cursor-pointer">
+          <div className="flex items-center justify-between pt-1">
+            <label className="flex items-center gap-2 cursor-pointer group">
               <input 
                 type="checkbox" 
                 checked={autoCopy} 
                 onChange={(e) => setAutoCopy(e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span className="text-[10px] font-bold uppercase text-gray-500">Auto</span>
+              <span className="text-[10px] font-black uppercase text-gray-400 group-hover:text-gray-900 transition-colors">Auto-Sync Clipboard</span>
             </label>
             <button 
               onClick={copyToClipboard}
-              className="px-3 py-1 bg-[#141414] text-white text-[10px] font-bold uppercase rounded hover:bg-gray-800"
+              className="px-4 py-1.5 bg-[#141414] text-white text-[10px] font-black uppercase rounded-lg hover:bg-blue-600 transition-all active:scale-95 shadow-md"
             >
               Manual Copy
             </button>
@@ -991,12 +1094,16 @@ while True:
             </motion.div>
             <h2 className="text-3xl font-bold tracking-tight">화면이 분리되었습니다</h2>
             <p className="text-gray-500 font-serif italic text-lg">노트북 화면 구석에 작은 창이 떠 있을 거예요!</p>
-            <div className="pt-8">
-              <button onClick={() => pipWindow.close()} className="px-8 py-3 bg-[#141414] text-white rounded-xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center gap-2 mx-auto">
-                <Monitor className="w-5 h-5" />
-                메인 화면으로 합치기
-              </button>
-            </div>
+            <div className="pt-8 flex flex-col gap-3">
+            <button onClick={() => pipWindow.close()} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-2 mx-auto w-full max-w-xs">
+              <Monitor className="w-5 h-5" />
+              메인 화면으로 합치기
+            </button>
+            <button onClick={resetApp} className="px-8 py-3 bg-[#141414] text-white rounded-xl font-bold shadow-lg hover:bg-gray-800 transition-all active:scale-95 flex items-center justify-center gap-2 mx-auto w-full max-w-xs">
+              <RefreshCw className="w-5 h-5" />
+              초기화면 및 홈으로
+            </button>
+          </div>
           </div>
           {pipRoot && ReactDOM.createPortal(renderCompactUI(), pipRoot)}
         </div>
@@ -1041,6 +1148,13 @@ while True:
                   </button>
                   <button onClick={copyToClipboard} className="p-2 hover:bg-gray-100 rounded transition-colors" title="Copy">
                     <Copy className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={resetApp}
+                    className="px-2 py-1 bg-red-600 text-white text-[10px] uppercase font-bold hover:bg-red-700 transition-colors rounded flex items-center gap-1"
+                  >
+                    <CornerDownLeft className="w-3 h-3" />
+                    초기화면
                   </button>
                   <button 
                     onClick={togglePip} 
@@ -1267,7 +1381,7 @@ while True:
           >
             <MousePointer2 className="w-5 h-5" />
           </button>
-          <button onClick={() => setMode('choice')} className="p-2 text-gray-400">
+          <button onClick={resetApp} className="p-2 text-gray-400">
             <CornerDownLeft className="w-5 h-5" />
           </button>
         </div>
@@ -1281,7 +1395,7 @@ while True:
           <h2 className="text-xl font-bold mb-2">연결 정보가 없습니다</h2>
           <p className="text-sm text-gray-500 mb-8">컴퓨터 화면의 코드를 입력하거나 QR 코드를 다시 찍어주세요.</p>
           <button 
-            onClick={() => setMode('choice')}
+            onClick={resetApp}
             className="w-full py-4 bg-[#141414] text-white rounded-xl font-bold shadow-lg"
           >
             처음으로 돌아가기
@@ -1373,7 +1487,11 @@ while True:
                         return (
                           <button
                             key={keyIndex}
-                            onClick={() => handleKeyClick(key)}
+                            onMouseDown={() => handleKeyPressStart(key)}
+                            onMouseUp={() => handleKeyPressEnd(key)}
+                            onMouseLeave={() => handleKeyPressEnd(key, true)}
+                            onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key); }}
+                            onTouchEnd={() => handleKeyPressEnd(key)}
                             className={`flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]`}
                           >
                             {key}
@@ -1394,13 +1512,29 @@ while True:
                   {/* Row 2: QWERTY */}
                   <div className="flex gap-1">
                     {['q','w','e','r','t','y','u','i','o','p'].map(k => (
-                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                      <button 
+                        key={k} 
+                        onMouseDown={() => handleKeyPressStart(k)}
+                        onMouseUp={() => handleKeyPressEnd(k)}
+                        onMouseLeave={() => handleKeyPressEnd(k, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                        onTouchEnd={() => handleKeyPressEnd(k)}
+                        className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                      >{k}</button>
                     ))}
                   </div>
                   {/* Row 3: ASDF */}
                   <div className="flex gap-1 px-[5%]">
                     {['a','s','d','f','g','h','j','k','l'].map(k => (
-                      <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                      <button 
+                        key={k} 
+                        onMouseDown={() => handleKeyPressStart(k)}
+                        onMouseUp={() => handleKeyPressEnd(k)}
+                        onMouseLeave={() => handleKeyPressEnd(k, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                        onTouchEnd={() => handleKeyPressEnd(k)}
+                        className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                      >{k}</button>
                     ))}
                   </div>
                   {/* Row 4: Shift, ZXCV, Backspace */}
@@ -1413,7 +1547,15 @@ while True:
                     </button>
                     <div className="flex-1 flex gap-1">
                       {['z','x','c','v','b','n','m'].map(k => (
-                        <button key={k} onClick={() => handleKeyClick(k)} className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]">{k}</button>
+                        <button 
+                          key={k} 
+                          onMouseDown={() => handleKeyPressStart(k)}
+                          onMouseUp={() => handleKeyPressEnd(k)}
+                          onMouseLeave={() => handleKeyPressEnd(k, true)}
+                          onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(k); }}
+                          onTouchEnd={() => handleKeyPressEnd(k)}
+                          className="flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium uppercase active:bg-[#3A3A3C]"
+                        >{k}</button>
                       ))}
                     </div>
                     <button 
@@ -1452,7 +1594,11 @@ while True:
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onMouseDown={() => handleKeyPressStart(key.id)}
+                        onMouseUp={() => handleKeyPressEnd(key.id)}
+                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
+                        onTouchEnd={() => handleKeyPressEnd(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1476,7 +1622,11 @@ while True:
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onMouseDown={() => handleKeyPressStart(key.id)}
+                        onMouseUp={() => handleKeyPressEnd(key.id)}
+                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
+                        onTouchEnd={() => handleKeyPressEnd(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1496,7 +1646,11 @@ while True:
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
                       <button
                         key={key.id}
-                        onClick={() => handleKeyClick(key.id)}
+                        onMouseDown={() => handleKeyPressStart(key.id)}
+                        onMouseUp={() => handleKeyPressEnd(key.id)}
+                        onMouseLeave={() => handleKeyPressEnd(key.id, true)}
+                        onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key.id); }}
+                        onTouchEnd={() => handleKeyPressEnd(key.id)}
                         className="h-16 bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">{key.id}</span>
@@ -1530,7 +1684,11 @@ while True:
                       </button>
                     </div>
                     <button 
-                      onClick={() => handleKeyClick('0')}
+                      onMouseDown={() => handleKeyPressStart('0')}
+                      onMouseUp={() => handleKeyPressEnd('0')}
+                      onMouseLeave={() => handleKeyPressEnd('0', true)}
+                      onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart('0'); }}
+                      onTouchEnd={() => handleKeyPressEnd('0')}
                       className="bg-[#2C2C2E] rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-[#3A3A3C] transition-all active:scale-95 relative overflow-hidden"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-[#8E8E93]">0</span>

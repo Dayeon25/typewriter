@@ -1,5 +1,5 @@
 {
-  "name": "Cheonjiin Remote Keyboard",
-  "description": "Use your smartphone as a Cheonjiin keyboard for your PC. Connect via real-time sync and type Korean characters easily.",
+  "name": "천지인 리모트 - 핸드폰으로 PC에 한글 타이핑",
+  "description": "핸드폰을 터치패드/천지인 키보드 삼아 PC에 한글을 직접 입력해 보세요. 메모장, 카톡 등 어디든 실시간으로 글자를 전달합니다.",
   "requestFramePermissions": []
 }

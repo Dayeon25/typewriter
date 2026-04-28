@@ -348,7 +348,7 @@ export default function App() {
     
     addLog(`Connecting to socket node: ${roomId}`);
     
-    const socket = io(window.location.origin, {
+    const socket = io({
       path: '/socket.io/',
       transports: ['polling', 'websocket'],
       reconnection: true,
@@ -1375,12 +1375,16 @@ if __name__ == "__main__":
               <h3 className="text-xs font-bold uppercase tracking-widest mb-4 opacity-50">연결이 안 되나요? (해결 방법)</h3>
               <div className="space-y-4 text-xs text-gray-600">
                 <div className="p-3 bg-red-50 border border-red-100 rounded">
-                  <p className="font-bold text-red-800 mb-1">초록불이 안 들어올 때:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>인터넷 연결을 확인하고 <b>새로고침</b> 버튼을 눌러주세요.</li>
-                    <li>공공 와이파이나 회사 보안망에서는 차단될 수 있습니다.</li>
-                    <li>브라우저를 껐다 켜보거나 다른 브라우저(크롬 등)를 써보세요.</li>
+                  <p className="font-bold text-red-800 mb-1">여기에 타이핑이 안 되나요? (Checklist):</p>
+                  <ul className="list-decimal list-inside space-y-1">
+                    <li><b>룸 번호 일치 확인:</b> 핸드폰 상단에 <span className="font-mono bg-white px-1">ROOM: {roomId}</span>가 똑같이 떠 있는지 확인하세요.</li>
+                    <li><b>모드 확인:</b> 핸드폰이 'Sender(송신)' 모드여야 합니다 (QR 스캔 시 자동 설정).</li>
+                    <li><b>사이트 권함:</b> 핸드폰 브라우저에서 '네트워크 권한' 또는 '자이로스코프(마우스용)' 권한을 물으면 허용해 주세요.</li>
                   </ul>
+                </div>
+                <div className="p-3 bg-green-50 border border-green-100 rounded">
+                  <p className="font-bold text-green-800 mb-1">메모장/카톡에 직접 쓰고 싶다면?</p>
+                  <p>화면 중앙의 <b>'도우미 파일 다운로드'</b>를 노트북에서 실행해야 합니다. 브라우저 밖의 프로그램에 글자를 넣어주는 역할을 합니다.</p>
                 </div>
                 <div className="p-3 bg-blue-50 border border-blue-100 rounded">
                   <p className="font-bold text-blue-800 mb-1">방 코드가 무엇인가요?</p>

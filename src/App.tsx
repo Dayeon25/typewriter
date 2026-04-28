@@ -1498,15 +1498,15 @@ if __name__ == "__main__":
                 </div>
               </div>
 
-            {/* Galaxy Style Keyboard - Clean Theme */}
+            {/* Galaxy Style Keyboard - Clean Theme with Accents */}
             <div 
-              className="bg-[#F2F2F7] p-1 pb-6 shrink-0 transition-transform duration-200 ease-out"
+              className="bg-[#F2F2F7] p-1.5 pb-8 shrink-0 transition-transform duration-200 ease-out border-t border-gray-200/50 shadow-[0_-4px_12px_rgba(0,0,0,0.03)]"
               style={{ transform: `translateY(${keyboardOffset}px)` }}
             >
               {inputMode === 'sym' ? (
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5 px-0.5">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (
-                    <div key={rowIndex} className="flex gap-1 px-0.5">
+                    <div key={rowIndex} className="flex gap-1.5 px-0.5">
                       {row.map((key, keyIndex) => {
                         if (key === 'backspace') {
                           return (
@@ -1515,7 +1515,7 @@ if __name__ == "__main__":
                               onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                               onPointerUp={stopBackspace}
                               onPointerLeave={stopBackspace}
-                              className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm transform active:scale-95 transition-transform"
+                              className="w-[12%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-[0_1px_2px_rgba(0,0,0,0.1)] transform active:scale-95 transition-all"
                             >
                               <Delete className="w-5 h-5 text-gray-700" />
                             </button>
@@ -1523,12 +1523,12 @@ if __name__ == "__main__":
                         }
                         if (key === 'ABC') {
                           return (
-                            <button key={key} onPointerDown={() => setInputMode('en')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">ABC</button>
+                            <button key={key} onPointerDown={() => setInputMode('en')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">ABC</button>
                           );
                         }
                         if (key === 'mode') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
+                            <button key={key} onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">
                               <span>한</span>
                               <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
                               <span className="ml-1">영</span>
@@ -1537,35 +1537,35 @@ if __name__ == "__main__":
                         }
                         if (key === 'space') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('space')} className="flex-1 h-10 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-blue-50 border-b-2 border-blue-200">
-                              <div className="w-16 h-1 bg-blue-100 rounded-full"></div>
+                            <button key={key} onPointerDown={() => handleKeyClick('space')} className="flex-1 h-11 bg-white rounded-md flex items-center justify-center shadow-[0_1px_2px_rgba(0,0,0,0.06)] active:bg-blue-50 border-b-2 border-blue-100">
+                              <div className="w-16 h-1.5 bg-blue-100 rounded-full"></div>
                             </button>
                           );
                         }
                         if (key === 'enter') {
                           return (
-                            <button key={key} onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
+                            <button key={key} onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">
                               <CornerDownLeft className="w-5 h-5 text-gray-700" />
                             </button>
                           );
                         }
                         if (key === '1/2') {
                           return (
-                            <button key={key} onPointerDown={() => setSymbolPage(2)} className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">1/2</button>
+                            <button key={key} onPointerDown={() => setSymbolPage(2)} className="w-[12%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">1/2</button>
                           );
                         }
                         if (key === '2/2') {
                           return (
-                            <button key={key} onPointerDown={() => setSymbolPage(1)} className="w-[12%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">2/2</button>
+                            <button key={key} onPointerDown={() => setSymbolPage(1)} className="w-[12%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">2/2</button>
                           );
                         }
                         return (
-                          <button
+                          <button 
                             key={keyIndex}
                             onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key); }}
                             onPointerUp={() => handleKeyPressEnd(key)}
                             onPointerLeave={() => handleKeyPressEnd(key, true)}
-                            className={`flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium active:bg-gray-100 shadow-sm transform active:scale-95 transition-transform`}
+                            className={`flex-1 h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium active:bg-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.06)] transform active:scale-95 transition-all`}
                           >
                             {key}
                           </button>
@@ -1577,51 +1577,51 @@ if __name__ == "__main__":
               ) : inputMode === 'en' ? (
                 <div className="flex flex-col gap-1.5 px-0.5">
                   {/* Row 1: Numbers */}
-                  <div className="flex gap-1">
+                  <div className="flex gap-1.5">
                     {['1','2','3','4','5','6','7','8','9','0'].map(k => (
-                      <button key={k} onPointerDown={() => handleKeyClick(k)} className="flex-1 h-9 bg-white rounded-md flex items-center justify-center text-gray-800 text-sm font-medium active:bg-gray-100 shadow-sm">{k}</button>
+                      <button key={k} onPointerDown={() => handleKeyClick(k)} className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium active:bg-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">{k}</button>
                     ))}
                   </div>
                   {/* Row 2: QWERTY */}
-                  <div className="flex gap-1">
+                  <div className="flex gap-1.5">
                     {['q','w','e','r','t','y','u','i','o','p'].map(k => (
                       <button 
                         key={k} 
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                         onPointerUp={() => handleKeyPressEnd(k)}
                         onPointerLeave={() => handleKeyPressEnd(k, true)}
-                        className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
+                        className="flex-1 h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                       >{k}</button>
                     ))}
                   </div>
-                  {/* Row 3: ASDF */}
-                  <div className="flex gap-1 px-[3%]">
+                  {/* Row 3: ASDFGHJKL */}
+                  <div className="flex gap-1.5 px-[3%]">
                     {['a','s','d','f','g','h','j','k','l'].map(k => (
                       <button 
                         key={k} 
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                         onPointerUp={() => handleKeyPressEnd(k)}
                         onPointerLeave={() => handleKeyPressEnd(k, true)}
-                        className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
+                        className="flex-1 h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                       >{k}</button>
                     ))}
                   </div>
-                  {/* Row 4: Shift, ZXCV, Backspace */}
-                  <div className="flex gap-1">
-                    <button onPointerDown={() => handleKeyClick('shift')} className={`w-[13%] h-10 rounded-md flex items-center justify-center transition-colors shadow-sm ${shiftState === 2 ? 'bg-blue-500 text-white' : shiftState === 1 ? 'bg-gray-800 text-white' : 'bg-[#D1D1D6] text-gray-700'}`}>
+                  {/* Row 4: Shift-ZXCVBNM-Backspace */}
+                  <div className="flex gap-1.5">
+                    <button onPointerDown={() => handleKeyClick('shift')} className={`w-[13%] h-11 rounded-md flex items-center justify-center transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.1)] ${shiftState === 2 ? 'bg-blue-500 text-white' : shiftState === 1 ? 'bg-gray-800 text-white' : 'bg-[#D1D1D6] text-gray-700'}`}>
                       <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
                         <path d="M12 4l-8 8h5v8h6v-8h5z"/>
                         {shiftState === 2 && <rect x="4" y="2" width="16" height="2" />}
                       </svg>
                     </button>
-                    <div className="flex-1 flex gap-1">
+                    <div className="flex-1 flex gap-1.5">
                       {['z','x','c','v','b','n','m'].map(k => (
                         <button 
                           key={k} 
                           onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(k); }}
                           onPointerUp={() => handleKeyPressEnd(k)}
                           onPointerLeave={() => handleKeyPressEnd(k, true)}
-                          className="flex-1 h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-base font-medium uppercase active:bg-gray-100 shadow-sm"
+                          className="flex-1 h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-medium uppercase active:bg-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                         >{k}</button>
                       ))}
                     </div>
@@ -1629,111 +1629,111 @@ if __name__ == "__main__":
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                       onPointerUp={stopBackspace}
                       onPointerLeave={stopBackspace}
-                      className="w-[13%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-sm"
+                      className="w-[13%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center active:bg-[#C7C7CC] shadow-[0_1px_2px_rgba(0,0,0,0.1)]"
                     >
                       <Delete className="w-5 h-5 text-gray-700" />
                     </button>
                   </div>
                   {/* Row 5: Bottom Bar */}
-                  <div className="flex gap-1">
-                    <button onPointerDown={() => setInputMode('sym')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-sm active:bg-[#C7C7CC]">!#1</button>
-                    <button onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-sm active:bg-[#C7C7CC]">
+                  <div className="flex gap-1.5">
+                    <button onPointerDown={() => setInputMode('sym')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center text-gray-700 text-xs font-bold shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">!#1</button>
+                    <button onPointerDown={() => handleKeyClick('mode')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex flex-col items-center justify-center text-gray-700 text-[8px] font-bold leading-tight shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">
                       <span>한</span>
                       <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
                       <span className="ml-1">영</span>
                     </button>
-                    <button onPointerDown={() => handleKeyClick(',')} className="w-[10%] h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">,</button>
-                    <button onPointerDown={() => handleKeyClick('space')} className="flex-1 h-10 bg-white rounded-md flex items-center justify-center shadow-sm active:bg-blue-50 border-b-2 border-blue-200">
-                      <div className="w-16 h-1 bg-blue-100 rounded-full"></div>
+                    <button onPointerDown={() => handleKeyClick(',')} className="w-[10%] h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-[0_1px_2px_rgba(0,0,0,0.06)] active:bg-gray-100">,</button>
+                    <button onPointerDown={() => handleKeyClick('space')} className="flex-1 h-11 bg-white rounded-md flex items-center justify-center shadow-[0_1px_2px_rgba(0,0,0,0.06)] active:bg-blue-50 border-b-2 border-blue-200">
+                      <div className="w-16 h-1.5 bg-blue-100 rounded-full"></div>
                     </button>
-                    <button onPointerDown={() => handleKeyClick('.')} className="w-[10%] h-10 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-sm active:bg-gray-100">.</button>
-                    <button onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-10 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-sm active:bg-[#C7C7CC]">
+                    <button onPointerDown={() => handleKeyClick('.')} className="w-[10%] h-11 bg-white rounded-md flex items-center justify-center text-gray-800 text-lg font-bold shadow-[0_1px_2px_rgba(0,0,0,0.06)] active:bg-gray-100">.</button>
+                    <button onPointerDown={() => handleKeyClick('enter')} className="w-[14%] h-11 bg-[#D1D1D6] rounded-md flex items-center justify-center shadow-[0_1px_2px_rgba(0,0,0,0.1)] active:bg-[#C7C7CC]">
                       <CornerDownLeft className="w-5 h-5 text-gray-700" />
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5 px-0.5 pt-1">
+                <div className="flex flex-col gap-2 px-0.5 pt-1">
                   {/* Row 1 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[0], KEYPAD_CONFIG[1], KEYPAD_CONFIG[2]].map(key => (
-                      <button
+                      <button 
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-[4.25rem] bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); startBackspace(e as any); }}
                       onPointerUp={stopBackspace}
                       onPointerLeave={stopBackspace}
-                      className="h-14 bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-red-500"
+                      className="h-[4.25rem] bg-[#D1D1D6] rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.08)] flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-red-500"
                     >
                       <Delete className="w-7 h-7" />
                     </button>
                   </div>
 
                   {/* Row 2 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[3], KEYPAD_CONFIG[4], KEYPAD_CONFIG[5]].map(key => (
-                      <button
+                      <button 
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-[4.25rem] bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('enter')}
-                      className="h-14 bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-blue-600"
+                      className="h-[4.25rem] bg-[#D1D1D6] rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.08)] flex items-center justify-center active:bg-[#C7C7CC] active:scale-95 transition-all text-gray-700 hover:text-blue-600"
                     >
                       <CornerDownLeft className="w-7 h-7" />
                     </button>
                   </div>
 
                   {/* Row 3 */}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {[KEYPAD_CONFIG[6], KEYPAD_CONFIG[7], KEYPAD_CONFIG[8]].map(key => (
-                      <button
+                      <button 
                         key={key.id}
                         onPointerDown={(e) => { (e.target as HTMLElement).releasePointerCapture(e.pointerId); handleKeyPressStart(key.id); }}
                         onPointerUp={() => handleKeyPressEnd(key.id)}
                         onPointerLeave={() => handleKeyPressEnd(key.id, true)}
-                        className="h-14 bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                        className="h-[4.25rem] bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                       >
                         <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">{key.id}</span>
-                        <span className="text-xl font-semibold text-gray-800">{key.label}</span>
+                        <span className="text-2xl font-semibold text-gray-800">{key.label}</span>
                       </button>
                     ))}
                     <button 
                       onPointerDown={() => handleKeyClick('punct')}
-                      className="h-14 bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-gray-50 active:scale-95 transition-all text-lg font-bold text-gray-800 border border-gray-100"
+                      className="h-[4.25rem] bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex items-center justify-center active:bg-gray-50 active:scale-95 transition-all text-xl font-bold text-gray-800 border border-gray-100"
                     >
                       .,?!
                     </button>
                   </div>
 
                   {/* Row 4 */}
-                  <div className="grid grid-cols-4 gap-1.5 h-14">
+                  <div className="grid grid-cols-4 gap-2 h-15">
                     <div className="flex gap-1.5">
                       <button 
                         onPointerDown={() => setInputMode('sym')}
-                        className={`flex-1 rounded-xl shadow-sm flex items-center justify-center text-xs font-bold transition-all active:scale-95 border ${inputMode === 'sym' ? 'bg-blue-600 text-white border-blue-400' : 'bg-[#D1D1D6] text-gray-700 border-transparent'}`}
+                        className={`flex-1 rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.08)] flex items-center justify-center text-xs font-bold transition-all active:scale-95 border ${inputMode === 'sym' ? 'bg-blue-600 text-white border-blue-400' : 'bg-[#D1D1D6] text-gray-700 border-transparent'}`}
                       >
                         !#1
                       </button>
                       <button 
                         onPointerDown={() => handleKeyClick('mode')}
-                        className={`flex-1 rounded-xl shadow-sm flex flex-col items-center justify-center text-[8px] font-bold transition-all active:scale-95 leading-tight ${inputMode === 'ko' ? 'bg-blue-50 text-blue-600 border border-blue-200 shadow-[inset_0_0_8px_rgba(37,99,235,0.1)]' : 'bg-[#D1D1D6] text-gray-700'}`}
+                        className={`flex-1 rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.08)] flex flex-col items-center justify-center text-[8px] font-bold transition-all active:scale-95 leading-tight ${inputMode === 'ko' ? 'bg-blue-50 text-blue-600 border border-blue-200 shadow-[inset_0_0_8px_rgba(37,99,235,0.1)]' : 'bg-[#D1D1D6] text-gray-700'}`}
                       >
                         <span>한글</span>
                         <div className="w-3 h-[1px] bg-gray-400 my-0.5 rotate-[-45deg]"></div>
@@ -1744,20 +1744,20 @@ if __name__ == "__main__":
                       onPointerDown={() => handleKeyClick('0')}
                       onPointerUp={() => handleKeyPressEnd('0')}
                       onPointerLeave={() => handleKeyPressEnd('0', true)}
-                      className="bg-white rounded-xl shadow-sm flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
+                      className="bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center active:bg-gray-50 transition-all active:scale-95 relative overflow-hidden border border-gray-100"
                     >
                       <span className="absolute top-1 right-2 text-[10px] font-bold text-gray-300">0</span>
-                      <span className="text-xl font-semibold text-gray-800">ㅇㅁ</span>
+                      <span className="text-2xl font-semibold text-gray-800">ㅇㅁ</span>
                     </button>
                     <button 
                       onPointerDown={() => handleKeyClick('space')}
-                      className="bg-white rounded-xl shadow-sm flex items-center justify-center active:bg-blue-50 active:scale-95 transition-all border border-gray-100 border-b-2 border-blue-100"
+                      className="bg-white rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.05)] flex items-center justify-center active:bg-blue-50 active:scale-95 transition-all border border-gray-100 border-b-2 border-blue-100"
                     >
-                      <div className="w-12 h-1 bg-blue-400 rounded-full"></div>
+                      <div className="w-12 h-1.5 bg-blue-400 rounded-full"></div>
                     </button>
                     <button 
                       onPointerDown={() => sendCommand('clear')}
-                      className="bg-[#D1D1D6] rounded-xl shadow-sm flex items-center justify-center text-xs font-bold text-gray-700 active:bg-red-50 active:text-red-600 transition-all active:scale-95 border border-transparent"
+                      className="bg-[#D1D1D6] rounded-xl shadow-[0_2px_4px_rgba(0,0,0,0.08)] flex items-center justify-center text-xs font-bold text-gray-700 active:bg-red-50 active:text-red-600 transition-all active:scale-95 border border-transparent"
                     >
                       지우기
                     </button>

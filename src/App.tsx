@@ -246,6 +246,99 @@ export default function App() {
     return () => window.removeEventListener('resize', setVh);
   }, []);
 
+  // Helper functions for Cheonjiin processing
+  const mapVowel = (seq: string): string | string[] => {
+    const table: Record<string, string> = {
+      'ㅣㆍ': 'ㅏ', 'ㅣㆍㆍ': 'ㅑ', 'ㆍㅣ': 'ㅓ', 'ㆍㆍㅣ': 'ㅕ',
+      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
+      'ㅡㅣ': 'ㅢ', 'ㅣㆍㅣ': 'ㅐ', 'ㅣㆍㆍㅣ': 'ㅒ', 'ㆍㅣㅣ': 'ㅔ',
+      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ',
+      'ㆍㅡㅣㆍ': 'ㅘ',
+      'ㆍㅡㅣㆍㅣ': 'ㅙ',
+      'ㅡㆍㆍㅣ': 'ㅝ',
+      'ㅡㆍㆍㅣㅣ': 'ㅞ',
+      'ㅡㆍㅣㆍㅣ': 'ㅙ', // User specific request
+      'ㅣ': 'ㅣ', 'ㆍ': 'ㆍ', 'ㅡ': 'ㅡ'
+    };
+    // Special case for single building blocks to ensure they show up
+    if (seq === 'ㆍ') return 'ㆍ'; 
+    if (seq === 'ㅣ') return 'ㅣ';
+    if (seq === 'ㅡ') return 'ㅡ';
+    
+    // Try to find the longest match from the start
+    for (let len = seq.length; len > 0; len--) {
+      const sub = seq.substring(0, len);
+      if (table[sub]) {
+        const remaining = seq.substring(len);
+        if (remaining) {
+          const nextMapped = mapVowel(remaining);
+          return Array.isArray(nextMapped) ? [table[sub], ...nextMapped] : [table[sub], nextMapped];
+        }
+        return table[sub];
+      }
+    }
+    return seq.split('');
+  };
+
+  const processCheonjiin = (jamos: string[]) => {
+    const result: string[] = [];
+    let i = 0;
+    while (i < jamos.length) {
+      const cur = jamos[i];
+      // If it's a Cheonjiin vowel building block
+      if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
+        let seq = cur;
+        let j = i + 1;
+        // Collect consecutive vowel blocks
+        while (j < jamos.length && (jamos[j] === 'ㅣ' || jamos[j] === 'ㆍ' || jamos[j] === 'ㅡ')) {
+          seq += jamos[j];
+          j++;
+        }
+        const mapped = mapVowel(seq);
+        if (Array.isArray(mapped)) {
+          result.push(...mapped);
+        } else {
+          result.push(mapped);
+        }
+        i = j;
+      } else {
+        result.push(cur);
+        i++;
+      }
+    }
+    return result;
+  };
+
+  const processEvent = useCallback((event: any) => {
+    if (mode !== 'receiver') return;
+    
+    const etype = event.type;
+    const edata = event.data || {};
+
+    if (etype === 'mousemove' || etype === 'mouse-move') {
+      const dx = edata.dx || 0;
+      const dy = edata.dy || 0;
+      setMousePos(prev => ({
+        x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
+        y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
+      }));
+    } else if (etype === 'click' || etype === 'mouse-click') {
+      const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
+      if (el instanceof HTMLElement) el.click();
+    } else if (etype === 'sync-text') {
+      setInputState(prev => {
+        const oldText = prev.committedText + (Hangul.assemble(processCheonjiin(prev.composition)) || "");
+        const deleteCount = edata.deleteCount || 0;
+        const newDisplay = oldText.slice(0, Math.max(0, oldText.length - deleteCount)) + (edata.insertText || "");
+        return { committedText: newDisplay, composition: [] };
+      });
+    } else if (etype === 'command') {
+      if (edata.cmd === 'clear') {
+        setInputState({ committedText: '', composition: [] });
+      }
+    }
+  }, [mode, setInputState, setMousePos]);
+
   // Global Error Listener
   useEffect(() => {
     const handleError = (e: ErrorEvent) => {
@@ -301,20 +394,7 @@ export default function App() {
     });
 
     socket.on('remote-event', (event) => {
-      if (mode === 'receiver') {
-        if (event.type === 'mousemove' || event.type === 'mouse-move') {
-          const dx = event.data.dx || 0;
-          const dy = event.data.dy || 0;
-          setMousePos(prev => ({
-            x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
-            y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
-          }));
-        } else if (event.type === 'click' || event.type === 'mouse-click') {
-          const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
-          if (el instanceof HTMLElement) el.click();
-        }
-      }
-      
+      processEvent(event);
       // If Python client is monitoring, they poll the REST API which bridges these events
     });
 
@@ -327,7 +407,7 @@ export default function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [roomId, mode]);
+  }, [roomId, mode, processEvent]);
 
   // REST Polling Fallback for Receiver (Ensures it works even if Socket.io is blocked)
   useEffect(() => {
@@ -343,17 +423,7 @@ export default function App() {
         events.forEach((event: any) => {
           if (event.seq > lastPolledSeq) {
             lastPolledSeq = event.seq;
-            if (event.type === 'mousemove' || event.type === 'mouse-move') {
-              const dx = event.data.dx || 0;
-              const dy = event.data.dy || 0;
-              setMousePos(prev => ({
-                x: Math.max(0, Math.min(window.innerWidth, prev.x + dx)),
-                y: Math.max(0, Math.min(window.innerHeight, prev.y + dy))
-              }));
-            } else if (event.type === 'click' || event.type === 'mouse-click') {
-              const el = document.elementFromPoint(mousePosRef.current.x, mousePosRef.current.y);
-              if (el instanceof HTMLElement) el.click();
-            }
+            processEvent(event);
           }
         });
       } catch (e) {}
@@ -361,7 +431,7 @@ export default function App() {
 
     const interval = setInterval(poll, 1500);
     return () => clearInterval(interval);
-  }, [mode, roomId, isConnected]);
+  }, [mode, roomId, isConnected, processEvent]);
 
   useEffect(() => {
     if (autoCopy && mode === 'receiver') {
@@ -410,68 +480,6 @@ export default function App() {
     } catch (err) {
       console.error('Emit error:', err);
     }
-  };
-
-  const processCheonjiin = (jamos: string[]) => {
-    const result: string[] = [];
-    let i = 0;
-    while (i < jamos.length) {
-      const cur = jamos[i];
-      // If it's a Cheonjiin vowel building block
-      if (cur === 'ㅣ' || cur === 'ㆍ' || cur === 'ㅡ') {
-        let seq = cur;
-        let j = i + 1;
-        // Collect consecutive vowel blocks
-        while (j < jamos.length && (jamos[j] === 'ㅣ' || jamos[j] === 'ㆍ' || jamos[j] === 'ㅡ')) {
-          seq += jamos[j];
-          j++;
-        }
-        const mapped = mapVowel(seq);
-        if (Array.isArray(mapped)) {
-          result.push(...mapped);
-        } else {
-          result.push(mapped);
-        }
-        i = j;
-      } else {
-        result.push(cur);
-        i++;
-      }
-    }
-    return result;
-  };
-
-  const mapVowel = (seq: string): string | string[] => {
-    const table: Record<string, string> = {
-      'ㅣㆍ': 'ㅏ', 'ㅣㆍㆍ': 'ㅑ', 'ㆍㅣ': 'ㅓ', 'ㆍㆍㅣ': 'ㅕ',
-      'ㆍㅡ': 'ㅗ', 'ㆍㆍㅡ': 'ㅛ', 'ㅡㆍ': 'ㅜ', 'ㅡㆍㆍ': 'ㅠ',
-      'ㅡㅣ': 'ㅢ', 'ㅣㆍㅣ': 'ㅐ', 'ㅣㆍㆍㅣ': 'ㅒ', 'ㆍㅣㅣ': 'ㅔ',
-      'ㆍㆍㅣㅣ': 'ㅖ', 'ㆍㅡㅣ': 'ㅚ', 'ㅡㆍㅣ': 'ㅟ',
-      'ㆍㅡㅣㆍ': 'ㅘ',
-      'ㆍㅡㅣㆍㅣ': 'ㅙ',
-      'ㅡㆍㆍㅣ': 'ㅝ',
-      'ㅡㆍㆍㅣㅣ': 'ㅞ',
-      'ㅡㆍㅣㆍㅣ': 'ㅙ', // User specific request
-      'ㅣ': 'ㅣ', 'ㆍ': 'ㆍ', 'ㅡ': 'ㅡ'
-    };
-    // Special case for single building blocks to ensure they show up
-    if (seq === 'ㆍ') return 'ㆍ'; 
-    if (seq === 'ㅣ') return 'ㅣ';
-    if (seq === 'ㅡ') return 'ㅡ';
-    
-    // Try to find the longest match from the start
-    for (let len = seq.length; len > 0; len--) {
-      const sub = seq.substring(0, len);
-      if (table[sub]) {
-        const remaining = seq.substring(len);
-        if (remaining) {
-          const nextMapped = mapVowel(remaining);
-          return Array.isArray(nextMapped) ? [table[sub], ...nextMapped] : [table[sub], nextMapped];
-        }
-        return table[sub];
-      }
-    }
-    return seq.split('');
   };
 
   const handleInput = (input: string, isCommand: boolean = false) => {
@@ -1510,7 +1518,7 @@ if __name__ == "__main__":
               </div>
 
             {/* Galaxy Style Keyboard - Dark Theme */}
-            <div className="bg-black p-1 pb-6 shrink-0">
+            <div className="bg-black p-1 pb-10 shrink-0">
               {inputMode === 'sym' ? (
                 <div className="flex flex-col gap-1">
                   {(symbolPage === 1 ? SYMBOL_LAYOUT_1 : SYMBOL_LAYOUT_2).map((row, rowIndex) => (

@@ -134,6 +134,7 @@ export default function App() {
   const [errorInfo, setErrorInfo] = useState<string>('');
   const [shiftState, setShiftState] = useState<0 | 1 | 2>(0); // 0: off, 1: once, 2: locked
   const [pipWindow, setPipWindow] = useState<any>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(380); // Default keyboard height
   
   // Viewport Height Fix for Mobile
   useEffect(() => {
@@ -632,7 +633,17 @@ export default function App() {
     }
   };
 
-  const handleKeyPressStart = (keyId: string) => {
+  const lastEventTime = useRef(0);
+  const handleKeyPressStart = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
+    // Prevent double triggers from touch/mouse emulation
+    const now = Date.now();
+    if (now - lastEventTime.current < 40) return;
+    lastEventTime.current = now;
+
+    if (e && 'touches' in e && e.cancelable) {
+      e.preventDefault();
+    }
+
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
     
     // Set a timer for long press (600ms)
@@ -642,7 +653,8 @@ export default function App() {
     }, 600);
   };
 
-  const handleKeyPressEnd = (keyId: string, wasLongPress: boolean = false) => {
+  const handleKeyPressEnd = (keyId: string, e?: React.TouchEvent | React.MouseEvent) => {
+    // Avoid double processing on end
     if (longPressTimer.current) {
       // It was a short click
       clearTimeout(longPressTimer.current);
@@ -728,20 +740,25 @@ def process_event(event_data):
             print(f" [+] Typing: {insert_text}")
             # Use clipboard to ensure Korean assembly is perfect
             pyperclip.copy(insert_text)
-            time.sleep(0.01) # Small delay for clipboard stability
+            time.sleep(0.05) # Increased delay for clipboard stability across apps
             if sys.platform == 'darwin':
                 pyautogui.hotkey('command', 'v')
             else:
                 pyautogui.hotkey('ctrl', 'v')
+            time.sleep(0.02) # Extra small delay for OS processing
                 
     elif etype == 'command':
         cmd = edata.get('cmd')
-        if cmd == 'backspace': pyautogui.press('backspace')
-        elif cmd == 'enter': pyautogui.press('enter')
-        elif cmd == 'space': pyautogui.press('space')
+        if cmd == 'backspace': 
+            pyautogui.press('backspace')
+        elif cmd == 'enter': 
+            pyautogui.press('enter')
+        elif cmd == 'space': 
+            pyautogui.press('space')
         elif cmd == 'clear':
             if sys.platform == 'darwin': pyautogui.hotkey('command', 'a')
             else: pyautogui.hotkey('ctrl', 'a')
+            time.sleep(0.05)
             pyautogui.press('backspace')
             
     elif etype == 'mouse-move':
@@ -825,15 +842,21 @@ if __name__ == "__main__":
     
     while True:
         if not current_room:
-            current_room = input("\\n[?] 연결할 룸 코드를 입력하세요 (예: ABCDEF): ").strip().upper()
+            print("\\n" + "="*50)
+            current_room = input("[?] 연결할 룸 코드를 입력하세요 (예: ABCDEF, 'exit'로 종료): ").strip().upper()
         
-        if not current_room: continue
-        
-        success = run_helper(current_room)
-        if success: # Manual stop
+        if not current_room or current_room == 'EXIT': 
             break
         
+        try:
+            success = run_helper(current_room)
+            if success: # Manual stop
+                break
+        except Exception as e:
+            print(f"\\n[!] 오류 발생: {e}")
+        
         # Room not found or error, ask for new code
+        print("\\n[!] 룸 연결이 종료되었습니다.")
         current_room = None
 `.trim();
 
@@ -1487,12 +1510,12 @@ if __name__ == "__main__":
                         return (
                           <button
                             key={keyIndex}
-                            onMouseDown={() => handleKeyPressStart(key)}
-                            onMouseUp={() => handleKeyPressEnd(key)}
-                            onMouseLeave={() => handleKeyPressEnd(key, true)}
-                            onTouchStart={(e) => { e.preventDefault(); handleKeyPressStart(key); }}
-                            onTouchEnd={() => handleKeyPressEnd(key)}
-                            className={`flex-1 h-10 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C]`}
+                            onMouseDown={(e) => handleKeyPressStart(key, e)}
+                            onMouseUp={(e) => handleKeyPressEnd(key, e)}
+                            onMouseLeave={(e) => handleKeyPressEnd(key, e)}
+                            onTouchStart={(e) => handleKeyPressStart(key, e)}
+                            onTouchEnd={(e) => handleKeyPressEnd(key, e)}
+                            className={`flex-1 h-12 bg-[#2C2C2E] rounded-md flex items-center justify-center text-white text-base font-medium active:bg-[#3A3A3C] shadow-sm`}
                           >
                             {key}
                           </button>
